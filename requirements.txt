@@ -1,0 +1,9 @@
+Werkzeug==2.0.1
+SQLAlchemy==1.4.23
+marshmallow_enum==1.5.1
+marshmallow==3.13.0
+Flask_SQLAlchemy==2.5.1
+flask_marshmallow==0.14.0
+Flask==2.0.1
+gunicorn
+PyJWT==1.7.1
