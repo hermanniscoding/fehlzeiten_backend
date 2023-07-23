@@ -1,12 +1,9 @@
 # from https://www.youtube.com/watch?v=PTZiDnuC86g
 # JWT from https://www.youtube.com/watch?v=WxGBoY5iNXY
 from copy import error
-import enum
-import re
 from flask import Flask, request, jsonify, make_response
-from flask_sqlalchemy import SQLAlchemy
 from flask_marshmallow import Marshmallow
-from marshmallow import Schema, fields
+from marshmallow import fields
 from marshmallow.decorators import pre_load
 from marshmallow_enum import EnumField
 from datetime import datetime, timedelta
@@ -17,6 +14,11 @@ import jwt
 from sqlalchemy.orm import backref
 from functools import wraps
 
+from models.pupil import *
+from models.schoolday import *
+from models.user import *
+from models.enums import *
+
 # Init app
 
 app = Flask(__name__)
@@ -26,153 +28,16 @@ basedir = os.path.abspath(os.path.dirname(__file__))
 
 # Database
 app.config['SECRET_KEY'] = 'THISISNOTTHEREALSECRETKEY'
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(basedir, 'db.sqlite')
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(basedir, 'db.sqlite3')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 # Init db
 
-db = SQLAlchemy(app)
 ma = Marshmallow(app)
 
-##########
-# MODELS #
-##########
-
-class SchoolyearEnum(enum.Enum):
-    E1 = 'E1'
-    E2 = 'E2'
-    E3 = 'E3'
-    S3 = 'S3'
-    S4 = 'S4'
-
-class GroupEnum(enum.Enum):
-    A1 = 'A1'
-    A2 = 'A2'
-    A3 = 'A3'
-    B1 = 'B1'
-    B2 = 'B2'
-    B3 = 'B3'
-    B4 = 'B4'
-    C1 = 'C1'
-    C2 = 'C2'
-    C3 = 'C3'
-
-class CoronaStatusEnum(enum.Enum):
-    index = 'index'
-    quarantine = 'quarantine'
-
-class MissedTypeEnum(enum.Enum):
-    missed = 'missed'
-    late = 'late'
-    distance = 'distance'
-
-class AdmonitionTypeEnum(enum.Enum):
-    yellow = 'yellow'
-    red = 'red'
-
-class User(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    public_id = db.Column(db.String(50), unique=True)
-    name = db.Column(db.String(50))
-    password = db.Column(db.String(80))
-    admin = db.Column(db.Boolean)
-
-class Schoolday(db.Model):
-    id = db.Column(db.Integer, primary_key = True)
-    schoolday = db.Column(db.Date, nullable = False)
-    missedclasses = db.relationship('MissedClass', backref='schoolday', cascade="all, delete-orphan")
-    admonitions = db.relationship('Admonition', backref='schoolday', cascade="all, delete-orphan")
-
-    def __init__(self, schoolday):
-        self.schoolday = schoolday
-
-class Hermannpupil(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(50), nullable=False)
-    group = db.Column(
-        db.Enum(GroupEnum),
-        nullable = False
-    )
-    schoolyear = db.Column(
-        db.Enum(SchoolyearEnum),
-        nullable = False
-    )
-    credit = db.Column(db.Integer, default = 0)
-    ogs = db.Column(db.Boolean)
-    pupilmissedclasses = db.relationship('MissedClass', backref='onemissedpupil', cascade="all, delete-orphan")
-    pupiladmonitions = db.relationship('Admonition', backref='admonishedpupil', cascade="all, delete-orphan")
-
-    def __init__(self, name, group, schoolyear, credit, ogs):
-        self.name = name
-        self.group = group
-        self. schoolyear = schoolyear
-        self.credit = credit
-        self.ogs = ogs
-
-class CoronaStatus(db.Model):
-    id = db.Column(db.Integer, primary_key = True)
-    coronapupil_id = db.Column(db.Integer, db.ForeignKey('hermannpupil.id'))
-    untildate = db.Column(db.Date, nullable = True)
-    corona_status = db.Column(
-        db.Enum(CoronaStatusEnum),
-        nullable = False
-    )
-
-    def __init__(self, coronapupil_id, corona_status, untildate):
-        self.coronapupil_id = coronapupil_id
-        self.untildate = untildate
-        self.corona_status = corona_status
-        
-
-class MissedClass(db.Model):
-    id = db.Column(db.Integer, primary_key = True)
-    missedpupil_id = db.Column(db.Integer, db.ForeignKey('hermannpupil.id'))
-  #  missedpupil = db.relationship('Hermannpupil', uselist=False, lazy='select')
-    missedday_id= db.Column(db.Integer, db.ForeignKey('schoolday.id'))
-  #  missedday = db.relationship('Schoolday', uselist=False, lazy='select')
-    missedtype = db.Column(
-        db.Enum(MissedTypeEnum),
-        nullable = False
-    )
-    excused = db.Column(db.Boolean)
-    contacted = db.Column(db.Boolean)
-
-    def __init__(self, missedpupil_id, missedday_id, missedtype, excused, contacted):
-        self.missedpupil_id = missedpupil_id
-        self.missedday_id = missedday_id
-        self.missedtype = missedtype
-        self.excused = excused
-        self.contacted = contacted
-
-class Admonition(db.Model):
-    id = db.Column(db.Integer, primary_key = True)
-    admonishedpupil_id = db.Column('admonishedpupil', db.Integer, db.ForeignKey('hermannpupil.id'))
-    admonishedday_id = db.Column('admonishedday', db.Integer, db.ForeignKey('schoolday.id'))
-    admonitiontype = db.Column(db.Enum(AdmonitionTypeEnum),
-    nullable = False
-    )
-    admonitionreason = db.Column(db.String(200), nullable = False)
-
-    def __init__(self, admonishedpupil_id, admonishedday_id, admonitiontype, admonitionreason):
-        self.admonishedpupil_id = admonishedpupil_id
-        self.admonishedday_id = admonishedday_id
-        self.admonitiontype = admonitiontype
-        self.admonitionreason = admonitionreason
-
-
-
-###################
-# SCHEMA AND INIT #
-###################
-
-class CoronaStatusSchema(ma.Schema):
-    corona_status = EnumField(CoronaStatusEnum, by_value=False)
-    class Meta:
-        fields = ('coronapupil_id', 'corona_status', 'untildate')
-coronastatus_schema = CoronaStatusSchema()
-coronastatuses_schema = CoronaStatusSchema(many=True)
-
-# Admonition
+#####################
+#HP ADMONITION SCHEMA 
+#####################
 
 class AdmonitionSchema(ma.Schema):
     admonitiontype = EnumField(AdmonitionTypeEnum, by_value=False)
@@ -182,19 +47,25 @@ class AdmonitionSchema(ma.Schema):
 admonition_schema = AdmonitionSchema()
 admonitions_schema = AdmonitionSchema(many = True)
 
-# MissedClass
+######################
+#HP MISSEDCLASS SCHEMA 
+######################
 
 class MissedClassSchema(ma.Schema):
     include_fk = True
     missedtype = EnumField(MissedTypeEnum, by_value=False)
-    # missedpupil = ma.Function(lambda obj: obj.hermanpupil.name)
+    missed_day = ma.Function(lambda obj:obj.schoolday.schoolday.isoformat())
+    # missed_schoolday = ma.Function(lambda obj:obj.schoolday.schoolday.isoformat())
+    # missedpupil = ma.Function(lambda obj: obj.pupil.internal_id)
     class Meta:
-        fields = ('missedpupil_id', 'missedday_id', 'missedtype', 'excused', 'contacted')
+        fields = ( 'missedpupil_id', 'missed_schoolday', 'missedtype', 'excused', 'contacted', 'returned', 'written_excuse', 'late_at', 'returned_at', 'created_by', 'modified_by')
 
 missedclass_schema = MissedClassSchema()
 missedclasses_schema = MissedClassSchema(many = True)
 
-# Schoolday
+###################
+#- SCHOOLDAY SCHEMA
+###################
 
 class SchooldaySchema(ma.Schema):
     missedclasses = fields.List(fields.Nested(MissedClassSchema, exclude=("missedday_id",)))
@@ -207,39 +78,163 @@ schooldays_schema = SchooldaySchema(many = True)
 
 class PupilMissedClassSchema(ma.Schema):
     missedtype = EnumField(MissedTypeEnum, by_value=False)
-    missed_schoolday = ma.Function(lambda obj:obj.schoolday.schoolday.isoformat())
+    missed_day = ma.Function(lambda obj:obj.schoolday.schoolday.isoformat())
     # missed_day = missed_schoolday.strftime('%Y-%m-%d')
     class Meta:
-        fields = ('missedpupil_id', 'missed_schoolday', 'missedtype', 'excused', 'contacted')
+        fields = ('missedpupil_id', 'missed_day', 'missedtype', 'excused', 'contacted', 'returned', 'written_excuse', 'late_at', 'returned_at', 'created_by', 'modified_by')
+
 
 pupilmissedclass_schema = PupilMissedClassSchema()
 pupilmissedclasses_schema = PupilMissedClassSchema(many = True)
 
 class PupilAdmonitionSchema(ma.Schema):
     admonitiontype = EnumField(AdmonitionTypeEnum, by_value=False)
-    admonished_schoolday = ma.Function(lambda obj:obj.schoolday.schoolday.isoformat())
+    admonished_day = ma.Function(lambda obj:obj.schoolday.schoolday.isoformat())
     class Meta:
-        fields = ('admonishedpupil_id', 'admonished_schoolday', 'admonitiontype', 'admonitionreason')
+        fields = ('admonishedpupil_id', 'admonished_day', 'admonitiontype', 'admonitionreason')
 
 pupiladmonition_schema = PupilAdmonitionSchema()
 pupiladmonitions_schema = PupilAdmonitionSchema(many = True)
 
-# Hermannpupil 
+####################
+#HP WORKBOOK SCHEMA 
+####################
 
-class HermannpupilSchema(ma.Schema):
-    group = EnumField(GroupEnum, by_value=False)
-    schoolyear = EnumField(SchoolyearEnum, by_value=False)
+class WorkbookSchema(ma.Schema):
+    subject = EnumField(SubjectTypeEnum, by_value=False)
+   # working_pupils = fields.List(fields.Nested(PupilSchema))
+    class Meta:
+        fields = ('isbn', 'name', 'subject')
+
+workbook_schema = WorkbookSchema()
+workbooks_schema = WorkbookSchema(many=True)
+
+class PupilWorkbookSchema(ma.Schema):
+    
+    class Meta:
+        fields = ('workbook_isbn', 'state', 'created_by', 'created_at' )
+
+pupil_workbook_schema = PupilWorkbookSchema()
+pupil_workbooks_schema = PupilWorkbookSchema(many=True)
+
+################
+#HP LISTS SCHEMA
+################
+class PupilListSchema(ma.Schema):
+   
+    class Meta:
+        fields = ('listed_pupil_id','origin_list', 'pupil_list_status', 'pupil_list_comment', 'pupil_list_entry_by')
+
+pupil_list_schema = PupilListSchema()
+pupil_lists_schema = PupilListSchema(many=True)
+
+class ListSchema(ma.Schema):
+    pupils_in_list = fields.List(fields.Nested(PupilListSchema))
+    class Meta:
+        fields = ('list_id', 'list_description', 'pupils_in_list')
+
+list_schema = ListSchema()
+lists_schema = ListSchema(many= True)
+
+############################
+#HP DEVELOPMENT GOALS SCHEMA
+############################
+
+class GoalCheckSchema(ma.Schema):
+    class Meta:
+        fields = ('goal_id', 'created_by', 'created_at', 'comment')
+
+goalcheck_schema = GoalCheckSchema()
+goalchecks_schema = GoalCheckSchema(many = True)
+
+class PupilGoalSchema(ma.Schema):
+    goal_checks = fields.List(fields.Nested(GoalCheckSchema))
+    class Meta:
+        fields = ('goal_category_id', 'created_by', 'created_at', 'achieved', 'achieved_at', 'description', 'strategies', 'goal_checks')
+
+pupilgoal_schema = PupilGoalSchema()
+pupilgoals_schema = PupilGoalSchema(many = True)
+# Pupil 
+
+class GoalCategoryStatusSchema(ma.Schema):
+    
+    class Meta:
+        fields = ('goal_category_id', 'state')    
+
+goalcategorystatus_schema = GoalCategoryStatusSchema()
+goalcategorystatuses_schema = GoalCategoryStatusSchema(many= True)
+
+############################
+#- PUPIL SCHEMA
+############################
+
+class PupilSchema(ma.Schema):
+    internal_id = str(Pupil.internal_id)
+    pupil_missedclasses = fields.List(fields.Nested(PupilMissedClassSchema, exclude=("missedpupil_id",)))
+    pupil_admonitions = fields.List(fields.Nested(PupilAdmonitionSchema, exclude=("admonishedpupil_id",)))
+    pupil_goals = fields.List(fields.Nested(PupilGoalSchema))
+    pupil_category_states = fields.List(fields.Nested(GoalCategoryStatusSchema))
+    pupil_workbooks = fields.List(fields.Nested(PupilWorkbookSchema))
+    pupil_lists = fields.List(fields.Nested(PupilListSchema))
+    
+    class Meta:
+        fields = ('internal_id', 'credit', 'ogs', 'individual_development_plan', 'specialneeds', 'migrationlanguagesupportends', 'migrationlanguagefollowingsupportends', 'pupil_missedclasses', 'pupil_admonitions', 'pupil_goals', 'pupil_category_states', 'pupil_workbooks', 'pupil_lists')
+
+pupil_schema = PupilSchema()
+pupils_schema = PupilSchema(many = True)
+
+class PupilOnlyGoalSchema(ma.Schema):
+    internal_id = str(Pupil.internal_id)
+    pupil_goals = fields.List(fields.Nested(PupilGoalSchema))
+    
+    class Meta:
+        fields = ('internal_id', 'pupil_goals')
+
+pupil_only_development_goal_schema = PupilOnlyGoalSchema()
+pupils_only_development_goal_schema = PupilOnlyGoalSchema(many = True)
+
+
+################
+#- PUPIL SCHEMA 
+################
+
+class PupilSchema(ma.Schema):
+    # group = EnumField(GroupEnum, by_value=False)
+    # schoolyear = EnumField(SchoolyearEnum, by_value=False)
+    ## change json key like in https://stackoverflow.com/questions/51727441/marshmallow-how-can-i-map-the-schema-attribute-to-another-key-when-serializing
+    internal_id = fields.String(required=True, data_key='internalId')
+    individual_development_plan = fields.String(required=True, data_key='individualDevelopmentPlan')
+    communication_pupil = fields.String(data_key='communicationPupil' )
+    communication_tutor1 = fields.String(data_key='communicationTutor1' )
+    communication_tutor2 = fields.String(data_key='communicationTutor2' )
+    migration_support_ends = fields.String(data_key='migrationSupportEnds')
+    migration_follow_support_ends = fields.String(data_key='migrationFollowSupportEnds')
+    preschool_revision = fields.String(data_key='preschoolRevision')
+    special_needs = fields.String(data_key='specialNeeds')
     pupilmissedclasses = fields.List(fields.Nested(PupilMissedClassSchema, exclude=("missedpupil_id",)))
     pupiladmonitions = fields.List(fields.Nested(PupilAdmonitionSchema, exclude=("admonishedpupil_id",)))
+    pupil_workbooks = fields.List(fields.Nested(PupilWorkbookSchema))
+    pupil_lists = fields.List(fields.Nested(PupilListSchema, exclude=('listed_pupil_id',)))
     class Meta:
-        fields = ('id', 'name', 'group', 'schoolyear', 'credit', 'ogs', 'pupilmissedclasses', 'pupiladmonitions')
+        
+        fields = ('internal_id', 'ogs', 'individual_development_plan', 'special_needs',
+                  'communication_pupil', 'communication_tutor1', 'communication_tutor2',
+                  'preschool_revision', 'migration_support_ends', 'migration_follow_support_ends',
+                   'pupilmissedclasses', 'pupiladmonitions', 'pupil_workbooks', 'pupil_lists')
 
-hermannpupil_schema = HermannpupilSchema()
-hermannpupils_schema = HermannpupilSchema(many = True)
+pupil_schema = PupilSchema()
+pupils_schema = PupilSchema(many = True)
 
-###############
-# CRUD ROUTES #
-###############
+#################################################################################################################################
+#- ##############################################################################################################################
+##                   ############################################################################################################
+#-     API ROUTES    ############################################################################################################
+##                   ############################################################################################################
+#- ##############################################################################################################################
+#################################################################################################################################
+
+#- TOKEN FUNCTION
+#################
 
 def token_required(f):
     @wraps(f)
@@ -261,8 +256,16 @@ def token_required(f):
         return f(current_user, *args, **kwargs)
 
     return decorated
-    
-# Get users
+
+###############################################################################################################
+#-                      #######################################################################################
+#-      API USERS       #######################################################################################
+#-                      #######################################################################################
+###############################################################################################################
+
+###########
+#- GET USER
+###########
 
 @app.route('/api/user', methods=['GET'])
 @token_required
@@ -285,23 +288,32 @@ def get_all_users(current_user):
 
     return jsonify({'users' : output})
 
-# Create user
+##############
+#- POST USER
+##############
 
 @app.route('/api/user', methods=['POST'])
-@token_required
-def create_user(current_user):
-    if not current_user.admin:
-        return jsonify({'message' : 'Cannot perform that function!'})
+def create_user():
+# @token_required
+# def create_user(current_user):
+    # if not current_user.admin:
+    #     return jsonify({'message' : 'Cannot perform that function!'})
 
     data = request.get_json()
 
+    is_admin = request.json['is_admin']
+
     hashed_password = generate_password_hash(data['password'], method='sha256')
 
-    new_user = User(public_id=str(uuid.uuid4()), name=data['name'], password=hashed_password, admin=False)
+    new_user = User(public_id=str(uuid.uuid4()), name=data['name'], password=hashed_password, admin=is_admin)
     db.session.add(new_user)
     db.session.commit()
 
     return jsonify({'message' : 'New user created!'})
+
+#################
+#- PUT USER
+#################
 
 @app.route('/user/<public_id>', methods=['PUT'])
 @token_required
@@ -319,7 +331,9 @@ def promote_user(current_user, public_id):
 
     return jsonify({'message' : 'The user has been promoted!'})
 
-# Delete user
+####################
+#- DELETE USER
+####################
 
 @app.route('/user/<public_id>', methods=['DELETE'])
 @token_required
@@ -337,7 +351,9 @@ def delete_user(current_user, public_id):
 
     return jsonify({'message' : 'The user has been deleted!'})
     
-# Login
+#####################
+#- GET USER LOGIN 
+#####################
 
 @app.route('/api/login')
 def login():
@@ -351,105 +367,422 @@ def login():
         return make_response('Could not verify', 401, {'WWW-Authenticate' : 'Basic realm="Login required!"'})
 
     if check_password_hash(user.password, auth.password):
-        token = jwt.encode({'public_id' : user.public_id, 'exp' : datetime.utcnow() + timedelta(hours=120)}, app.config['SECRET_KEY'])
+        token = jwt.encode({'public_id' : user.public_id, 'exp' : datetime.utcnow() + timedelta(hours=120)},
+                           app.config['SECRET_KEY'])
 
         return jsonify({'token' : token.decode('UTF-8')})
 
     return make_response('Could not verify', 401, {'WWW-Authenticate' : 'Basic realm="Login required!"'})
 
-# Create a Hermannpupil
+################################################################################################################
+#-                       #######################################################################################
+#-      API PUPILS       #######################################################################################
+#-                       #######################################################################################
+################################################################################################################
 
-@app.route('/api/hermannkind', methods=['POST'])
+###############
+#- POST PUPIL
+###############
+
+@app.route('/api/pupil', methods=['POST'])
 @token_required
-def add_hermannpupil(current_user):
-    name = request.json['name']
-    group = request.json['group']
-    schoolyear = request.json['schoolyear']
+def add_pupil(current_user):
+    internal_id = request.json['internal_id']
     credit = request.json['credit']
     ogs = request.json['ogs']
+    individual_development_plan = request.json['individual_development_plan']
+    special_needs = request.json['special_needs']
+    communication_pupil = request.json['communication_pupil']
+    communication_tutor1 = request.json['communication_tutor1']
+    communication_tutor2 = request.json['communication_tutor2']
+    preschool_revision = request.json['preschool_revision']
+    migration_support_ends = request.json['migration_support_ends']
+    migration_follow_support_ends = request.json['migration_follow_support_ends']
 
-    new_hermannpupil = Hermannpupil(name, group, schoolyear, credit, ogs)
+    new_pupil = Pupil(internal_id, credit, ogs, individual_development_plan, special_needs, communication_pupil, communication_tutor1, communication_tutor2, preschool_revision, migration_support_ends, migration_follow_support_ends)
     
-    db.session.add(new_hermannpupil)
+    db.session.add(new_pupil)
     db.session.commit()
-    return hermannpupil_schema.jsonify(new_hermannpupil)
+    return pupil_schema.jsonify(new_pupil)
 
-# Bulk create Hermannpupils
+# Bulk create Pupils
 # https://stackoverflow.com/questions/60261701/sqlalchemy-insert-from-a-json-list-to-database
 
-# Update a Hermannpupil
+###############
+#- PATCH PUPIL
+###############
 
 @app.route('/api/hermannkind/<id>', methods=['PATCH'])
 @token_required
-def update_hermannpupil(current_user, id):
-    hermannpupil = Hermannpupil.query.get(id)
-    hermannpupil.name = request.json['name']
-    hermannpupil.group = request.json['group']
-    hermannpupil.schoolyear = request.json['schoolyear']
-    hermannpupil.credit = request.json['credit']
-    hermannpupil.ogs = request.json['ogs']
+def update_pupil(current_user, id):
+    pupil = Pupil.query.get(id)
+    pupil.internal_id = request.json['internal_id']
+    pupil.group = request.json['group']
+    pupil.schoolyear = request.json['schoolyear']
+    pupil.credit = request.json['credit']
+    pupil.ogs = request.json['ogs']
     db.session.commit()
-    return hermannpupil_schema.jsonify(hermannpupil)
+    return pupil_schema.jsonify(pupil)
 
-# update the Hermannpupil's credit
+##############################
+#- PATCH PUPIL'S CREDIT
+##############################
 
 @app.route('/api/hermannkind/<id>/credit', methods=['PATCH'])
 @token_required
-def update_hermannpupilcredit(current_user, id):
-    hermannpupil = Hermannpupil.query.get(id)
-    hermannpupil.credit = request.json['credit']
+def update_pupilcredit(current_user, id):
+    pupil = Pupil.query.get(id)
+    pupil.credit = request.json['credit']
     db.session.commit()
-    return hermannpupil_schema.jsonify(hermannpupil)
+    return pupil_schema.jsonify(pupil)
 
-# update the Hermannpupil's OGS status
+###############################
+#- PATCH PUPIL'S OGS STATUS
+###############################
 
 @app.route('/api/hermannkind/<id>/ogs', methods=['PATCH'])
 @token_required
-def update_hermannpupilogsstatus(current_user, id):
-    hermannpupil = Hermannpupil.query.get(id)
-    hermannpupil.ogs = request.json['ogs']
+def update_pupilogsstatus(current_user, id):
+    pupil = Pupil.query.get(id)
+    pupil.ogs = request.json['ogs']
     db.session.commit()
-    return hermannpupil_schema.jsonify(hermannpupil)
+    return pupil_schema.jsonify(pupil)
 
-# delete a Hermannpupil
+###############################
+#- DELETE PUPIL
+###############################
 
 @app.route('/api/hermannkind/<id>', methods=['DELETE'])
 @token_required
-def delete_hermannpupil(current_user, id):
-    hermannpupil = Hermannpupil.query.get(id)
-    db.session.delete(hermannpupil)
+def delete_pupil(current_user, id):
+    pupil = Pupil.query.get(id)
+    db.session.delete(pupil)
     db.session.commit()
-    return jsonify( {"message": "The hermannpupil was deleted!"})
+    return jsonify( {"message": "The pupil was deleted!"})
 
-# Get all hermannpupils
+###############################
+#- GET ALL PUPILS
+###############################
 
-@app.route('/api/hermannkinder', methods=['GET'])
+@app.route('/api/pupils', methods=['GET'])
 @token_required
-def get_hermannpupils(current_user):
-    all_hermannpupils = Hermannpupil.query.all()
-    result = hermannpupils_schema.dump(all_hermannpupils)
+def get_pupils(current_user):
+    all_pupils = Pupil.query.all()
+    result = pupils_schema.dump(all_pupils)
     return jsonify(result)
 
-# Get all hermannpupils of a class
+###############################
+#- GET ALL PUPILS OF ONE CLASS
+###############################
 
 @app.route('/api/hermannkinder/<group>', methods=['GET'])
 @token_required
-def get_grouphermannpupils(current_user, group):
-    group_hermannpupils = Hermannpupil.query.filter_by(group = group).all()
-    result = hermannpupils_schema.dump(group_hermannpupils)
+def get_grouppupils(current_user, group):
+    group_pupils = Pupil.query.filter_by(group = group).all()
+    result = pupils_schema.dump(group_pupils)
     return jsonify(result)
 
-# Get specific hermannpupil
+###############################
+#- GET ONE PUPIL
+###############################
 
 @app.route('/api/hermannkind/<id>', methods=['GET'])
 @token_required
-def get_hermannpupil(current_user, id):
-    this_hermannpupil = db.session.query(Hermannpupil).get(id)
-    return hermannpupil_schema.jsonify(this_hermannpupil)
+def get_pupil(current_user, id):
+    this_pupil = db.session.query(Pupil).get(id)
+    return pupil_schema.jsonify(this_pupil)
 
-# Create a Schoolday
+###################################################################################################################
+#-                          #######################################################################################
+#-      API WORKBOOKS       #######################################################################################
+#-                          #######################################################################################
+###################################################################################################################
 
-@app.route('/api/schultag', methods=['POST'])
+###############################
+#- GET WORKBOOKS CATALOGUE
+###############################
+
+@app.route('/api/workbook/all', methods=['GET'])
+@token_required
+def get_workbooks(current_user):
+    all_workbooks = Workbook.query.all()
+    result = workbooks_schema.dump(all_workbooks)
+    return jsonify(result)
+
+###############################
+#- POST WORKBOOK
+###############################
+
+@app.route('/api/workbook/new', methods=['POST'])
+@token_required
+def create_workbook(current_user):
+    isbn = request.json['isbn']
+    name = request.json['name']
+    subject = request.json['subject']
+
+    if subject not in subject_enums:
+        return jsonify({"message": "Das Fach ist nicht zulässig!"})
+
+    new_workbook = Workbook(isbn, name, subject)
+    db.session.add(new_workbook)
+    db.session.commit()
+    return workbook_schema.jsonify(new_workbook)
+
+###############################
+#- DELETE WORKBOOK
+###############################
+
+@app.route('/api/workbook/<isbn>', methods=['DELETE'])
+@token_required
+def delete_workbook(current_user, isbn):
+    this_workbook = Workbook.query.filter_by(isbn = isbn).first()
+
+    db.session.delete(this_workbook)
+    db.session.commit()
+    return jsonify( {"message": "Arbeitsheft aus dem Katalog gelöscht!"})
+
+###############################
+#- POST PUPIL WORKBOOK
+###############################
+
+@app.route('/api/kind/<internal_id>/workbook/<isbn>', methods=['POST'])
+@token_required
+def add_workbook_to_pupil(current_user, internal_id, isbn):
+    this_pupil = Pupil.query.filter_by(internal_id = internal_id).first()
+    pupil_id = internal_id
+    isbn = isbn
+    state = 'active'
+    created_by = current_user.name
+    created_at = datetime.now()
+
+    new_pupil_workbook = PupilWorkbook(pupil_id, isbn, state, created_by, created_at)
+    db.session.add(new_pupil_workbook)
+    db.session.commit()
+    return pupil_schema.jsonify(this_pupil)
+
+###############################
+#- PATCH PUPIL WORKBOOK STATE
+###############################
+
+@app.route('/api/kind/<internal_id>/workbook/<isbn>', methods=['PATCH'])
+@token_required
+def update_PupilWorkbook(current_user, internal_id, isbn):
+    this_pupil = Pupil.query.filter_by(internal_id = internal_id).first()
+    this_workbook = PupilWorkbook.query.filter_by(pupil_id = internal_id, workbook_isbn = isbn).first()
+    this_workbook.state = request.json['state']
+    db.session.commit()
+    return pupil_schema.jsonify(this_pupil)
+
+###############################
+#- DELETE PUPIL WORKBOOK
+###############################
+
+@app.route('/api/kind/<internal_id>/workbook/<isbn>', methods=['DELETE'])
+@token_required
+def delete_PupilWorkbook(current_user, internal_id, isbn):
+    this_workbook = PupilWorkbook.query.filter_by(pupil_id = internal_id, workbook_isbn = isbn).first()
+    db.session.delete(this_workbook)
+    db.session.commit()
+    return jsonify( {"message": "Das Arbeitsheft wurde gelöscht!"})
+
+###################################################################################################################
+#-                          #######################################################################################
+#-        API GOALS         #######################################################################################
+#-                          #######################################################################################
+###################################################################################################################
+
+
+###############################
+#- GET CATEGORIES
+###############################
+
+@app.route('/api/goalcategories', methods=['GET'])
+@token_required
+def get_categories(current_user):
+    root = {
+        "category_id": 0,
+        "category_name": "development_goal_categories",
+        "subcategories": [],
+    }
+    dict = {0: root}
+    all_categories = GoalCategory.query.all()
+    for item in all_categories:
+        dict[item.category_id] = current = {
+            "category_id": item.category_id,
+            "parent_category": item.parent_category,
+            "category_name": item.category_name,
+            "subcategories": [],
+        }
+        # Adds actual category to the subcategories list of the parent
+        parent = dict.get(item.parent_category, root)
+        parent["subcategories"].append(current)
+
+    return jsonify(root)
+
+###############################
+#- POST GOAL
+###############################
+
+@app.route('/api/kind/<internal_id>/goal', methods=['POST'])
+@token_required
+def add_goal(current_user, internal_id):
+    pupil = Pupil.query.filter_by(internal_id = internal_id).first()
+    pupilid = pupil.internal_id
+    goalcategoryid = request.json['goal_category_id']
+    created_by = current_user.name
+    created_at = request.json['created_at']
+    achieved = request.json['achieved']
+    achieved_at = request.json['achieved_at']
+    description = request.json['description']
+    strategies = request.json['strategies']
+
+    new_goal = PupilGoal(pupilid, goalcategoryid, created_by, created_at, achieved, achieved_at, description, strategies)
+    db.session.add(new_goal)
+    db.session.commit()
+    return pupilgoal_schema.jsonify(new_goal)
+
+###############################
+#- PUT GOAL
+###############################
+
+@app.route('/api/kind/<internal_id>/goal/<goal_id>', methods=['PUT'])
+@token_required
+def put_goal(current_user, internal_id, goal_id):
+    goal = PupilGoal.query.filter_by(id = goal_id).first()
+    goal.pupil_id = internal_id
+    goal.goalcategoryid = request.json['goal_category_id']
+    goal.created_by = current_user.name
+    goal.created_at = request.json['created_at']
+    goal.achieved = request.json['achieved']
+    goal.achieved_at = request.json['achieved_at']
+    goal.description = request.json['description']
+    goal.strategies = request.json['strategies']
+
+    db.session.commit()
+    return pupilgoal_schema.jsonify(goal)
+
+###############################
+#- POST GOAL CHECK
+###############################
+
+@app.route('/api/kind/goal/<goal_id>/check', methods=['POST'])
+@token_required
+def add_goalcheck(current_user, goal_id):
+    this_goal = PupilGoal.query.filter_by(id = goal_id).first()
+    this_goal_id = goal_id
+    created_by = current_user.name
+    created_at = request.json['created_at']
+    comment = request.json['comment']
+
+    new_goalcheck = GoalCheck(this_goal_id, created_by, created_at, comment)
+    db.session.add(new_goalcheck)
+    db.session.commit()
+    return pupilgoal_schema.jsonify(this_goal)
+
+###############################
+#- PUT GOAL CHECK
+###############################
+
+@app.route('/api/kind/goal/check/<id>', methods=['PUT'])
+@token_required
+def put_goalcheck(current_user, id):
+    goal = GoalCheck.query.filter_by(id = id).first()
+    goal.created_by = current_user.name
+    goal.created_at = request.json['created_at']
+    goal.comment = request.json['comment']
+    db.session.commit()
+    return pupilgoal_schema.jsonify(goal)
+
+###############################
+#- POST GATEGORY STATE
+###############################
+
+@app.route('/api/kind/<internal_id>/categorystatus/<category_id>', methods=['POST'])
+@token_required
+def add_category_state(current_user, internal_id, category_id):
+    this_pupil = Pupil.query.filter_by(internal_id = internal_id).first()
+    pupil_id = internal_id
+    goal_category_id = category_id
+    state = request.json['state']
+    created_by = current_user.name
+    created_at = request.json['created_at']
+
+    new_category_status = PupilCategoryStatus(pupil_id, goal_category_id, state, created_by, created_at)
+    db.session.add(new_category_status)
+    db.session.commit()
+    return pupil_schema.jsonify(this_pupil)
+
+###############################
+#- PUT GATEGORY STATE
+###############################
+
+@app.route('/api/kind/<internal_id>/categorystatus/<status_id>', methods=['PUT'])
+@token_required
+def put_category_state(current_user, internal_id, status_id):
+    this_pupil = Pupil.query.filter_by(internal_id = internal_id).first()
+    status = PupilCategoryStatus.query.filter_by(id = status_id).first()
+    status.pupil_id = internal_id
+    status.goal_category_id = request.json['goal_category_id']
+    status.state = request.json['state']
+    status.created_by = current_user.name
+    status.created_at = request.json['created_at']
+
+    db.session.commit()
+    return pupil_schema.jsonify(this_pupil)
+
+###################################################################################################################
+#-                          #######################################################################################
+#-        API LISTS         #######################################################################################
+#-                          #######################################################################################
+###################################################################################################################
+
+###############################
+#- POST LIST
+###############################
+
+@app.route('/api/list/new', methods=['POST'])
+@token_required
+def add_list(current_user):
+    
+    list_id = str(uuid.uuid4())
+    list_description = request.json['list_description']
+    new_list = List(list_id, list_description)
+    db.session.add(new_list)
+    all_pupils = Pupil.query.all()
+    
+    for item in all_pupils:
+        origin_list = list_id
+        listed_pupil_id = item.internal_id
+        pupil_list_status = False
+        pupil_list_comment = ''
+        pupil_list_entry_by = ''
+        new_pupil_list = PupilList(origin_list, listed_pupil_id, pupil_list_status, pupil_list_comment, pupil_list_entry_by)
+        db.session.add(new_pupil_list)
+        db.session.commit()
+    return list_schema.jsonify(new_list)
+
+###############################
+#- GET LISTS
+###############################
+
+@app.route('/api/list/all', methods=['GET'])
+@token_required
+def get_lists(current_user):
+    all_lists = List.query.all()
+    result = lists_schema.dump(all_lists)
+    return jsonify(result)
+
+####################################################################################################################
+#-                           #######################################################################################
+#-      API SCHOOLDAYS       #######################################################################################
+#-                           #######################################################################################
+####################################################################################################################
+
+###############################
+#- POST SCHOOLDAY
+###############################
+
+@app.route('/api/schoolday', methods=['POST'])
 @token_required
 def add_schoolday(current_user):
     schoolday = request.json['schoolday']
@@ -463,7 +796,9 @@ def add_schoolday(current_user):
         db.session.commit()
         return schoolday_schema.jsonify(new_schoolday)
 
-# Get all schooldays
+###############################
+#- GET ALL SCHOOLDAYS
+###############################
 
 @app.route('/api/schultage', methods=['GET'])
 @token_required
@@ -472,7 +807,9 @@ def get_schooldays(current_user):
     result = schooldays_schema.dump(all_schooldays)
     return jsonify(result)
 
-# Get specific schoolday
+###############################
+#- GET ONE SCHOOLDAY
+###############################
 
 @app.route('/api/schultag/<date>', methods=['GET'])
 @token_required
@@ -481,7 +818,9 @@ def get_schooday(current_user, date):
     this_schoolday = db.session.query(Schoolday).filter(Schoolday.schoolday == stringtodatetime ).first()
     return schoolday_schema.jsonify(this_schoolday)
 
-# Delete specific schoolday
+###############################
+#- DELETE ONE SCHOOLDAY
+###############################
 
 @app.route('/api/schultag/<date>', methods=['DELETE'])
 @token_required
@@ -492,14 +831,21 @@ def delete_schoolday(current_user, date):
     db.session.commit()
     return jsonify( {"message": "The schoolday was deleted!"})
 
+######################################################################################################################
+#-                             #######################################################################################
+#-      API MISSED CLASS       #######################################################################################
+#-                             #######################################################################################
+######################################################################################################################
 
-# Create a missedclass
+###############################
+#- POST MISSED CLASS
+###############################
 
-@app.route('/api/fehlzeit', methods=['POST'])
+@app.route('/api/missed_class', methods=['POST'])
 @token_required
 def add_missedclass(current_user):
     missedpupil_id = request.json['missedpupil_id']
-    missedday = request.json['missedday']
+    missedday = request.json['missed_day']
     stringtodatetime = datetime.strptime(missedday, '%Y-%m-%d').date()
     this_schoolday = db.session.query(Schoolday).filter(Schoolday.schoolday == stringtodatetime ).first()
     missedday_id = this_schoolday.id
@@ -507,15 +853,24 @@ def add_missedclass(current_user):
     if missedclass_exists == True :
         return jsonify( {"message": "This missed class exists already - please update instead!"})
     else:    
-        missedtype = request.json['missedtype']
+        missedtype = request.json['missed_type']
         excused = request.json['excused']
         contacted = request.json['contacted']
-        new_missedclass = MissedClass(missedpupil_id, missedday_id, missedtype, excused, contacted)
+        returned = request.json['returned']
+        returned_at = request.json['returnedAt']
+        late_at = request.json['lateAt']
+        written_excuse = request.json['writtenExcuse']
+        created_by = current_user.name
+        modified_by = None
+        new_missedclass = MissedClass(missedpupil_id, missedday_id, missedtype, excused, contacted, returned, written_excuse, late_at, returned_at, created_by, modified_by)
+
         db.session.add(new_missedclass)
         db.session.commit()
         return missedclass_schema.jsonify(new_missedclass)
 
-# Get all missedclasses
+###############################
+#- GET ALL MISSED CLASSES
+###############################
 
 @app.route('/api/fehlzeiten', methods=['GET'])
 @token_required
@@ -524,7 +879,9 @@ def get_missedclasses(current_user):
     result = pupilmissedclasses_schema.dump(all_missedclasses)
     return jsonify(result)
 
-# Get specific missedclass
+###############################
+#- GET ONE MISSED CLASS
+###############################
 
 @app.route('/api/fehlzeit/<id>', methods=['GET'])
 @token_required
@@ -532,7 +889,9 @@ def get_missedclass(current_user, id):
     this_missedclass = db.session.query(MissedClass).get(id)
     return pupilmissedclass_schema.jsonify(this_missedclass)
 
-# Update a missedclass
+###############################
+#- PATCH MISSED CLASS
+###############################
 
 @app.route('/api/fehlzeit/<id>/<date>', methods=['PATCH'])
 @token_required
@@ -548,7 +907,9 @@ def update_missedclass(current_user, id, date):
     db.session.commit()
     return missedclass_schema.jsonify(missedclass)
 
-# Update a missedtype from a pupil on a certain day
+###############################
+#- PATCH MISSED CLASS (MISSED TYPE)
+###############################
 
 @app.route('/api/fehlzeit/type/<id>/<date>', methods=['PATCH'])
 @token_required
@@ -564,7 +925,9 @@ def update_missedclass_type_with_date(current_user, id, date):
     db.session.commit()
     return missedclass_schema.jsonify(missedclass)
 
-# Update an excused bool from a pupil on a certain day
+###############################
+#- PATCH MISSED CLASS (EXCUSED BOOL)
+###############################
 
 @app.route('/api/fehlzeit/status/<id>/<date>', methods=['PATCH'])
 @token_required
@@ -580,7 +943,9 @@ def update_missedclass_excused_status_with_date(current_user, id, date):
     db.session.commit()
     return missedclass_schema.jsonify(missedclass)
 
-# Update a contacted bool from a pupil on a certain day
+###############################
+#- PATCH MISSED CLASS (CONTACTED BOOL)
+###############################
 
 @app.route('/api/fehlzeit/contacted/<id>/<date>', methods=['PATCH'])
 @token_required
@@ -596,7 +961,9 @@ def update_missedclass_contacted_status_with_date(current_user, id, date):
     db.session.commit()
     return missedclass_schema.jsonify(missedclass)
 
-# Delete missedclass from a certain pupil on a certain day
+###############################
+#- DELETE MISSED CLASS WITH DATE
+###############################
 
 @app.route('/api/fehlzeit/<pupil_id>/<date>', methods=['DELETE'])
 @token_required
@@ -613,7 +980,9 @@ def delete_missedclass_with_date(current_user, pupil_id, date):
     db.session.commit()
     return jsonify( {"message": "The missed class was deleted!"})
    
-# Delete a missedclass
+###############################
+#- DELETE MISSED CLASS WITH ID
+###############################
 
 @app.route('/api/fehlzeit/<id>', methods=['DELETE'])
 @token_required
@@ -623,7 +992,15 @@ def delete_missedclass(current_user, id):
     db.session.commit()
     return jsonify( {"message": "The missed class was deleted!"})
 
-# Create an admonition
+#####################################################################################################################
+#-                            #######################################################################################
+#-      API ADMONITIONS       #######################################################################################
+#-                            #######################################################################################
+#####################################################################################################################
+
+###############################
+#- POST ADMONITION
+###############################
 
 @app.route('/api/karte', methods=['POST'])
 @token_required
@@ -645,7 +1022,9 @@ def add_admonition(current_user):
         db.session.commit()
         return admonition_schema.jsonify(new_admonition)
 
-# Get all admonitions
+###############################
+#- GET ADMONITIONS
+###############################
 
 @app.route('/api/karten', methods=['GET'])
 @token_required
@@ -654,7 +1033,9 @@ def get_admonitions(current_user):
     result = pupiladmonitions_schema.dump(all_admonitions)
     return jsonify(result)
 
-# Get specific admonition
+###############################
+#- GET ONE ADMONITION
+###############################
 
 @app.route('/api/karte/<id>', methods=['GET'])
 @token_required
@@ -662,7 +1043,9 @@ def get_admonition(current_user, id):
     this_admonition = db.session.query(Admonition).get(id)
     return pupiladmonition_schema.jsonify(this_admonition)
 
-# Update an admonition
+###############################
+#- PATCH ADMONITION
+###############################
 
 @app.route('/api/karte/<id>', methods=['PATCH'])
 @token_required
@@ -673,7 +1056,9 @@ def update_admonition(current_user, id):
     db.session.commit()
     return admonition_schema.jsonify(admonition)
 
-# Delete an admonition
+###############################
+#- DELETE ADMONITION BY ID
+###############################
 
 @app.route('/api/karte/<id>', methods=['DELETE'])
 @token_required
@@ -683,7 +1068,9 @@ def delete_admonition(current_user, id):
     db.session.commit()
     return jsonify( {"message": "The admonition was deleted!"})
 
-# Delete an admonition from a certain pupil on a certain day
+##########################################
+#- DELETE ADMONITION BY PUPIL_ID AND DATE
+##########################################
 
 @app.route('/api/karte/<pupil_id>/<date>', methods=['DELETE'])
 @token_required
@@ -697,73 +1084,11 @@ def delete_admonition_by_day(current_user, pupil_id, date):
     db.session.commit()
     return jsonify( {"message": "The admonition was deleted!"})
 
-
-# Create a corona status
-
-@app.route('/api/coronastatus', methods=['POST'])
-@token_required
-def add_coronastatus(current_user):
-    coronapupil_id = request.json['coronapupil_id']
-    untildate_string = request.json['untildate']
-    corona_status = request.json['corona_status']
-    untildate = datetime.strptime(untildate_string, '%Y-%m-%d').date()
-    coronastatus_exists = db.session.query(CoronaStatus).filter(CoronaStatus.coronapupil_id == coronapupil_id ).first() is not None
-    if coronastatus_exists == True :
-        return jsonify( {"message": "This corona status exists already - please update instead!"})
-    else:    
-
-        new_coronastatus = CoronaStatus(coronapupil_id, corona_status, untildate)
-        db.session.add(new_coronastatus)
-        db.session.commit()
-        return coronastatus_schema.jsonify(new_coronastatus)
-
-# Update a corona status status
-
-@app.route('/api/coronastatus/status/<id>', methods=['PATCH'])
-@token_required
-def update_coronastatus_status(current_user, id):
-    this_coronastatus = db.session.query(CoronaStatus).filter(CoronaStatus.coronapupil_id == id ).first() 
-    this_coronastatus.corona_status = request.json['corona_status']
-    # untildate_string = request.json['untildate']
-    # this_coronastatus.untildate = datetime.strptime(untildate_string, '%Y-%m-%d').date()
-    
-    db.session.commit()
-    return coronastatus_schema.jsonify(this_coronastatus)
-
-# Update a corona status untildate
-
-@app.route('/api/coronastatus/date/<id>', methods=['PATCH'])
-@token_required
-def update_coronastatus_date(current_user, id):
-    this_coronastatus = db.session.query(CoronaStatus).filter(CoronaStatus.coronapupil_id == id ).first() 
-    # this_coronastatus.corona_status = request.json['corona_status']
-    untildate_string = request.json['untildate']
-    this_coronastatus.untildate = datetime.strptime(untildate_string, '%Y-%m-%d').date()
-    
-    db.session.commit()
-    return coronastatus_schema.jsonify(this_coronastatus)
-
-# Get all corona statuses
-
-@app.route('/api/coronastatus', methods=['GET'])
-@token_required
-def get_coronastatuses(current_user):
-    all_coronastatuses = CoronaStatus.query.all()
-    result = coronastatuses_schema.dump(all_coronastatuses)
-    return jsonify(result)
-
-# Delete corona status from a certain pupil
-
-@app.route('/api/coronastatus/<id>', methods=['DELETE'])
-@token_required
-def delete_coronastatus_with_id(current_user, id):
-    this_coronastatus = db.session.query(CoronaStatus).filter(CoronaStatus.coronapupil_id == id).first() 
-
-    db.session.delete(this_coronastatus)
-    db.session.commit()
-    return jsonify( {"message": "The corona status was deleted!"})
-
 # Run server
-
+# db.init_app(app) because of https://stackoverflow.com/questions/9692962/flask-sqlalchemy-import-context-issue/9695045#9695045
+db.init_app(app)
+with app.app_context():
+    db.drop_all()
+    db.create_all()
 if __name__ == '__main__':
     app.run(debug=True)
