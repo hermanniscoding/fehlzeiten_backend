@@ -6,8 +6,6 @@ from .enums import *
 
 # db = SQLAlchemy()
 
-#- WIKI
-# Relationships & back_populates: https://stackoverflow.com/questions/51335298/concepts-of-backref-and-back-populate-in-sqlalchemy
 
 
 #- ##############################################################################################
@@ -119,8 +117,7 @@ class SchoolList(db.Model):
     #- RELATIONSHIP TO PUPILS ONE-TO-MANY over PUPIL LIST
     pupilsinlist = db.relationship('PupilList', back_populates='pupil_in_list', cascade="all, delete-orphan")
 
-    def __init__(self, id, list_id, list_description):
-        self.id = id
+    def __init__(self, list_id, list_description):
         self.list_id = list_id
         self.list_description = list_description
 
@@ -128,7 +125,7 @@ class PupilList(db.Model):
     id = db.Column(db.Integer, primary_key = True)
     pupil_list_status = db.Column(db.Boolean)
     pupil_list_comment = db.Column(db.String(30))
-    pupil_list_entry_by = db.Column(db.String(20),nullable = False)
+    pupil_list_entry_by = db.Column(db.String(20))
 
     #- RELATIONSHIPS #######################################
 
@@ -208,7 +205,7 @@ class PupilGoal(db.Model):
 
 class GoalCategory(db.Model):
     id = db.Column(db.Integer, primary_key = True)
-    category_id = db.Column(db.Integer, nullable = False)
+    category_id = db.Column(db.Integer, unique=True, nullable = False)
     parent_category = db.Column(db.Integer, nullable = True)
     category_name = db.Column(db.String(200), nullable = False)
 
@@ -226,7 +223,6 @@ class GoalCategory(db.Model):
 
 class GoalCheck(db.Model):
     id = db.Column(db.Integer, primary_key = True)
-    check_id = db.Column(db.Integer, nullable = False, unique = True)
     created_by = db.Column(db.String(20),nullable = False)
     created_at = db.Column(db.String(25), nullable = False)
     comment = db.Column(db.String(50), nullable = False)
@@ -235,8 +231,7 @@ class GoalCheck(db.Model):
     goal_id = db.Column(db.Integer, db.ForeignKey('pupil_goal.id'))
     goal = db.relationship('PupilGoal', back_populates='goalchecks')
 
-    def __init__(self, check_id, goal_id, created_by, created_at, comment):
-        self.check_id = check_id
+    def __init__(self, goal_id, created_by, created_at, comment):
         self.goal_id = goal_id
         self.created_by = created_by
         self.created_at = created_at

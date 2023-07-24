@@ -11,13 +11,33 @@ import os
 import uuid
 from werkzeug.security import generate_password_hash, check_password_hash
 import jwt
-from sqlalchemy.orm import backref
 from functools import wraps
+
+from apispec import APISpec
+from apispec.ext.marshmallow import MarshmallowPlugin
+from apispec_webframeworks.flask import FlaskPlugin
+from marshmallow import Schema, fields
+from flask import Flask, abort, request, make_response, jsonify
+from pprint import pprint
+import json
 
 from models.pupil import *
 from models.schoolday import *
 from models.user import *
 from models.enums import *
+
+#- WIKI
+#- Relationships & back_populates: https://stackoverflow.com/questions/51335298/concepts-of-backref-and-back-populate-in-sqlalchemy
+#- Swagger for flask:   https://stackoverflow.com/questions/62066474/python-flask-automatically-generated-swagger-openapi-3-0
+#-                      https://apispec.readthedocs.io/en/latest/index.html
+#-                      http://donofden.com/blog/2020/06/14/Python-Flask-automatically-generated-Swagger-3-0-openapi-Document
+#- Many to many delete orphans:     https://github.com/sqlalchemy/sqlalchemy/wiki/ManyToManyOrphan
+#-                                  https://stackoverflow.com/questions/68355401/how-to-remove-sqlalchemy-many-to-many-orphans-from-database
+
+#- IMAGES:
+
+#- WEBSOCKET:   https://www.donskytech.com/python-flask-websockets/?utm_content=cmp-true
+#-              https://blog.miguelgrinberg.com/post/add-a-websocket-route-to-your-flask-2-x-application
 
 # Init app
 
@@ -35,14 +55,15 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 ma = Marshmallow(app)
 
+
 #####################
 #HP ADMONITION SCHEMA 
 #####################
 
 class AdmonitionSchema(ma.Schema):
-    admonitiontype = EnumField(AdmonitionTypeEnum, by_value=False)
+    admonition_type = EnumField(AdmonitionTypeEnum, by_value=False)
     class Meta:
-        fields = ('admonishedpupil_id', 'admonishedday_id', 'admonitiontype', 'admonitionreason')
+        fields = ('admonishedpupil_id', 'admonished_day_id', 'admonition_type', 'admonition_reason')
 
 admonition_schema = AdmonitionSchema()
 admonitions_schema = AdmonitionSchema(many = True)
@@ -53,177 +74,219 @@ admonitions_schema = AdmonitionSchema(many = True)
 
 class MissedClassSchema(ma.Schema):
     include_fk = True
-    missedtype = EnumField(MissedTypeEnum, by_value=False)
-    missed_day = ma.Function(lambda obj:obj.schoolday.schoolday.isoformat())
+    missed_type = EnumField(MissedTypeEnum, by_value=False)
+    missed_day = ma.Function(lambda obj: obj.schoolday.schoolday.isoformat())
     # missed_schoolday = ma.Function(lambda obj:obj.schoolday.schoolday.isoformat())
     # missedpupil = ma.Function(lambda obj: obj.pupil.internal_id)
     class Meta:
-        fields = ( 'missedpupil_id', 'missed_schoolday', 'missedtype', 'excused', 'contacted', 'returned', 'written_excuse', 'late_at', 'returned_at', 'created_by', 'modified_by')
+        fields = ( 'missed_pupil_id', 'missed_schoolday', 'missed_type', 'excused', 'contacted', 'returned', 'written_excuse', 'late_at', 'returned_at', 'created_by', 'modified_by')
 
 missedclass_schema = MissedClassSchema()
 missedclasses_schema = MissedClassSchema(many = True)
 
 ###################
-#- SCHOOLDAY SCHEMA
+#- SCHOOLDAY SCHEMA - CHECKED
 ###################
 
 class SchooldaySchema(ma.Schema):
-    missedclasses = fields.List(fields.Nested(MissedClassSchema, exclude=("missedday_id",)))
-    admonitions = fields.List(fields.Nested(AdmonitionSchema, exclude=("admonishedday_id",)))
+    # missedclasses = fields.List(fields.Nested(MissedClassSchema, exclude=("missed_day_id",)))
+    missedclasses = fields.List(fields.Nested(MissedClassSchema))
+    admonitions = fields.List(fields.Nested(AdmonitionSchema))
     class Meta:
         fields = ('schoolday', 'missedclasses', 'admonitions')
 
 schoolday_schema = SchooldaySchema()
 schooldays_schema = SchooldaySchema(many = True)
 
-class PupilMissedClassSchema(ma.Schema):
-    missedtype = EnumField(MissedTypeEnum, by_value=False)
-    missed_day = ma.Function(lambda obj:obj.schoolday.schoolday.isoformat())
+class MissedClassSchema(ma.Schema):
+    include_fk = True
+    missed_type = EnumField(MissedTypeEnum, by_value=False)
+    #- lambda like https://stackoverflow.com/questions/39581129/how-to-construct-an-api-endpoint-with-foreign-keys-replaced-by-their-values
+    missed_day = ma.Pluck(SchooldaySchema, 'schoolday')
+
+    # missed_day = ma.Function(lambda obj: obj.Schoolday.schoolday.isoformat())
     # missed_day = missed_schoolday.strftime('%Y-%m-%d')
     class Meta:
-        fields = ('missedpupil_id', 'missed_day', 'missedtype', 'excused', 'contacted', 'returned', 'written_excuse', 'late_at', 'returned_at', 'created_by', 'modified_by')
-
-
-pupilmissedclass_schema = PupilMissedClassSchema()
-pupilmissedclasses_schema = PupilMissedClassSchema(many = True)
+        fields = ('missed_pupil_id', 'missed_day', 'missed_type', 'excused', 'contacted', 'returned', 'written_excuse', 'late_at', 'returned_at', 'created_by', 'modified_by')
+    
+missedclass_schema = MissedClassSchema()
+missedclasses_schema = MissedClassSchema(many = True)
 
 class PupilAdmonitionSchema(ma.Schema):
-    admonitiontype = EnumField(AdmonitionTypeEnum, by_value=False)
-    admonished_day = ma.Function(lambda obj:obj.schoolday.schoolday.isoformat())
+    include_fk = True
+    admonition_type = EnumField(AdmonitionTypeEnum, by_value=False)
+    admonished_day = ma.Pluck(SchooldaySchema, 'schoolday')
+    # admonished_day = ma.Function(lambda obj: obj.schoolday.schoolday.isoformat())
     class Meta:
-        fields = ('admonishedpupil_id', 'admonished_day', 'admonitiontype', 'admonitionreason')
+        fields = ('admonishedpupil_id', 'admonished_day', 'admonition_type', 'admonition_reason')
 
 pupiladmonition_schema = PupilAdmonitionSchema()
 pupiladmonitions_schema = PupilAdmonitionSchema(many = True)
 
 ####################
-#HP WORKBOOK SCHEMA 
+#- WORKBOOK SCHEMA - CHECKED
 ####################
-
-class WorkbookSchema(ma.Schema):
-    subject = EnumField(SubjectTypeEnum, by_value=False)
-   # working_pupils = fields.List(fields.Nested(PupilSchema))
-    class Meta:
-        fields = ('isbn', 'name', 'subject')
-
-workbook_schema = WorkbookSchema()
-workbooks_schema = WorkbookSchema(many=True)
-
 class PupilWorkbookSchema(ma.Schema):
     
     class Meta:
         fields = ('workbook_isbn', 'state', 'created_by', 'created_at' )
 
 pupil_workbook_schema = PupilWorkbookSchema()
-pupil_workbooks_schema = PupilWorkbookSchema(many=True)
+pupilworkbooks_schema = PupilWorkbookSchema(many=True)
+
+class PupilWorkbookListSchema(ma.Schema):
+    
+    class Meta:
+        fields = ('pupil_id', 'state', 'created_by', 'created_at' )
+
+pupil_workbook_schema = PupilWorkbookSchema()
+pupilworkbooks_schema = PupilWorkbookSchema(many=True)
+
+class WorkbookSchema(ma.Schema):
+    subject = EnumField(SubjectTypeEnum, by_value=False)
+    workbookpupils = fields.List(fields.Nested(PupilWorkbookListSchema))
+    class Meta:
+        fields = ('isbn', 'name', 'subject', 'workbookpupils')
+
+workbook_schema = WorkbookSchema()
+workbooks_schema = WorkbookSchema(many=True)
+
 
 ################
-#HP LISTS SCHEMA
+#- LISTS SCHEMA - CHECKED
 ################
 class PupilListSchema(ma.Schema):
    
     class Meta:
-        fields = ('listed_pupil_id','origin_list', 'pupil_list_status', 'pupil_list_comment', 'pupil_list_entry_by')
+        fields = ('listed_pupil_id','pupil_list_status', 'pupil_list_comment', 'pupil_list_entry_by')
 
 pupil_list_schema = PupilListSchema()
-pupil_lists_schema = PupilListSchema(many=True)
+pupillists_schema = PupilListSchema(many=True)
+
+class PupilProfileListSchema(ma.Schema):
+   
+    class Meta:
+        fields = ('origin_list', 'pupil_list_status', 'pupil_list_comment', 'pupil_list_entry_by')
+
+pupilprofilelist_schema = PupilListSchema()
+pupilprofilelists_schema = PupilListSchema(many=True)
 
 class ListSchema(ma.Schema):
-    pupils_in_list = fields.List(fields.Nested(PupilListSchema))
+    pupilsinlist = fields.List(fields.Nested(PupilListSchema))
     class Meta:
-        fields = ('list_id', 'list_description', 'pupils_in_list')
+        fields = ('list_id', 'list_description', 'pupilsinlist')
 
 list_schema = ListSchema()
 lists_schema = ListSchema(many= True)
 
 ############################
-#HP DEVELOPMENT GOALS SCHEMA
+#- DEVELOPMENT GOALS SCHEMA - CHECKED
 ############################
 
 class GoalCheckSchema(ma.Schema):
     class Meta:
-        fields = ('goal_id', 'created_by', 'created_at', 'comment')
+        fields = ('created_by', 'created_at', 'comment')
 
 goalcheck_schema = GoalCheckSchema()
 goalchecks_schema = GoalCheckSchema(many = True)
 
 class PupilGoalSchema(ma.Schema):
-    goal_checks = fields.List(fields.Nested(GoalCheckSchema))
+    goalchecks = fields.List(fields.Nested(GoalCheckSchema))
     class Meta:
-        fields = ('goal_category_id', 'created_by', 'created_at', 'achieved', 'achieved_at', 'description', 'strategies', 'goal_checks')
+        fields = ('goal_category_id', 'created_by', 'created_at', 'achieved', 'achieved_at', 'description', 'strategies', 'goalchecks')
 
 pupilgoal_schema = PupilGoalSchema()
 pupilgoals_schema = PupilGoalSchema(many = True)
+pupilgoals_schema = PupilGoalSchema(many = True)
+# Pupil 
+pupilgoals_schema = PupilGoalSchema(many = True) 
 # Pupil 
 
-class GoalCategoryStatusSchema(ma.Schema):
+class PupilCategoryStatusSchema(ma.Schema):
     
     class Meta:
         fields = ('goal_category_id', 'state')    
 
-goalcategorystatus_schema = GoalCategoryStatusSchema()
-goalcategorystatuses_schema = GoalCategoryStatusSchema(many= True)
+pupilcategorystatus_schema = PupilCategoryStatusSchema()
+pupilcategorystatuses_schema = PupilCategoryStatusSchema(many= True)
+
+class GoalCategorySchema(ma.Schema):
+    categorygoals = fields.List(fields.Nested(PupilGoalSchema))
+    categorystatuses = fields.List(fields.Nested(PupilCategoryStatusSchema))
+
+    class Meta:
+        fields = ('category_id', 'category_name', 'categorygoals', 'categorystatuses')
+
+goalcategory_schema = GoalCategorySchema()
+goalcategories_schema = GoalCategorySchema(many = True)
 
 ############################
-#- PUPIL SCHEMA
+#- PUPIL SCHEMA - CHECKED
 ############################
 
 class PupilSchema(ma.Schema):
     internal_id = str(Pupil.internal_id)
-    pupil_missedclasses = fields.List(fields.Nested(PupilMissedClassSchema, exclude=("missedpupil_id",)))
-    pupil_admonitions = fields.List(fields.Nested(PupilAdmonitionSchema, exclude=("admonishedpupil_id",)))
-    pupil_goals = fields.List(fields.Nested(PupilGoalSchema))
-    pupil_category_states = fields.List(fields.Nested(GoalCategoryStatusSchema))
-    pupil_workbooks = fields.List(fields.Nested(PupilWorkbookSchema))
-    pupil_lists = fields.List(fields.Nested(PupilListSchema))
+    pupilmissedclasses = fields.List(fields.Nested(MissedClassSchema, exclude=("missed_pupil_id",)))
+    pupiladmonitions = fields.List(fields.Nested(PupilAdmonitionSchema))
+    pupilgoals = fields.List(fields.Nested(PupilGoalSchema))
+    pupilcategorystatuses = fields.List(fields.Nested(PupilCategoryStatusSchema))
+    pupilworkbooks = fields.List(fields.Nested(PupilWorkbookSchema))
+    pupillists = fields.List(fields.Nested(PupilListSchema, exclude=("listed_pupil_id",)))
     
     class Meta:
-        fields = ('internal_id', 'credit', 'ogs', 'individual_development_plan', 'specialneeds', 'migrationlanguagesupportends', 'migrationlanguagefollowingsupportends', 'pupil_missedclasses', 'pupil_admonitions', 'pupil_goals', 'pupil_category_states', 'pupil_workbooks', 'pupil_lists')
+        fields = ('internal_id', 'credit', 'ogs', 
+                  'individual_development_plan', 'five_years', 
+                  'special_needs', 'communication_pupil', 
+                  'communication_tutor1', 'communication_tutor2', 
+                  'preschool_revision', 'migration_support_ends', 
+                  'migration_follow_support_ends', 'pupilmissedclasses', 
+                  'pupiladmonitions', 'pupilgoals', 'pupilcategorystatuses', 
+                  'pupilworkbooks', 'pupillists')
 
 pupil_schema = PupilSchema()
 pupils_schema = PupilSchema(many = True)
 
 class PupilOnlyGoalSchema(ma.Schema):
     internal_id = str(Pupil.internal_id)
-    pupil_goals = fields.List(fields.Nested(PupilGoalSchema))
+    pupilgoals = fields.List(fields.Nested(PupilGoalSchema))
     
     class Meta:
-        fields = ('internal_id', 'pupil_goals')
+        fields = ('internal_id', 'pupilgoals')
 
-pupil_only_development_goal_schema = PupilOnlyGoalSchema()
-pupils_only_development_goal_schema = PupilOnlyGoalSchema(many = True)
+pupil_only_goal_schema = PupilOnlyGoalSchema()
+pupils_only_goal_schema = PupilOnlyGoalSchema(many = True)
 
 
-################
-#- PUPIL SCHEMA 
-################
+# ################
+# #- PUPIL SCHEMA 
+# ################
 
-class PupilSchema(ma.Schema):
-    # group = EnumField(GroupEnum, by_value=False)
-    # schoolyear = EnumField(SchoolyearEnum, by_value=False)
-    ## change json key like in https://stackoverflow.com/questions/51727441/marshmallow-how-can-i-map-the-schema-attribute-to-another-key-when-serializing
-    internal_id = fields.String(required=True, data_key='internalId')
-    individual_development_plan = fields.String(required=True, data_key='individualDevelopmentPlan')
-    communication_pupil = fields.String(data_key='communicationPupil' )
-    communication_tutor1 = fields.String(data_key='communicationTutor1' )
-    communication_tutor2 = fields.String(data_key='communicationTutor2' )
-    migration_support_ends = fields.String(data_key='migrationSupportEnds')
-    migration_follow_support_ends = fields.String(data_key='migrationFollowSupportEnds')
-    preschool_revision = fields.String(data_key='preschoolRevision')
-    special_needs = fields.String(data_key='specialNeeds')
-    pupilmissedclasses = fields.List(fields.Nested(PupilMissedClassSchema, exclude=("missedpupil_id",)))
-    pupiladmonitions = fields.List(fields.Nested(PupilAdmonitionSchema, exclude=("admonishedpupil_id",)))
-    pupil_workbooks = fields.List(fields.Nested(PupilWorkbookSchema))
-    pupil_lists = fields.List(fields.Nested(PupilListSchema, exclude=('listed_pupil_id',)))
-    class Meta:
+# class PupilSchema(ma.Schema):
+#     # group = EnumField(GroupEnum, by_value=False)
+#     # schoolyear = EnumField(SchoolyearEnum, by_value=False)
+#     ## change json key like in https://stackoverflow.com/questions/51727441/marshmallow-how-can-i-map-the-schema-attribute-to-another-key-when-serializing
+#     internal_id = fields.String(required=True, data_key='internalId')
+#     individual_development_plan = fields.String(required=True, data_key='individualDevelopmentPlan')
+#     communication_pupil = fields.String(data_key='communicationPupil' )
+#     communication_tutor1 = fields.String(data_key='communicationTutor1' )
+#     communication_tutor2 = fields.String(data_key='communicationTutor2' )
+#     migration_support_ends = fields.String(data_key='migrationSupportEnds')
+#     migration_follow_support_ends = fields.String(data_key='migrationFollowSupportEnds')
+#     preschool_revision = fields.String(data_key='preschoolRevision')
+#     special_needs = fields.String(data_key='specialNeeds')
+#     missedclasses = fields.List(fields.Nested(MissedClassSchema, exclude=("missed_pupil_id",)))
+#     pupiladmonitions = fields.List(fields.Nested(PupilAdmonitionSchema, exclude=("admonishedpupil_id",)))
+#     pupilworkbooks = fields.List(fields.Nested(PupilWorkbookSchema))
+#     pupillists = fields.List(fields.Nested(PupilListSchema, exclude=('listed_pupil_id',)))
+#     class Meta:
         
-        fields = ('internal_id', 'ogs', 'individual_development_plan', 'special_needs',
-                  'communication_pupil', 'communication_tutor1', 'communication_tutor2',
-                  'preschool_revision', 'migration_support_ends', 'migration_follow_support_ends',
-                   'pupilmissedclasses', 'pupiladmonitions', 'pupil_workbooks', 'pupil_lists')
+#         fields = ('internal_id', 'ogs', 'individual_development_plan', 'special_needs',
+#                   'communication_pupil', 'communication_tutor1', 'communication_tutor2',
+#                   'preschool_revision', 'migration_support_ends', 'migration_follow_support_ends',
+#                    'missedclasses', 'pupiladmonitions', 'pupilworkbooks', 'pupillists')
 
-pupil_schema = PupilSchema()
-pupils_schema = PupilSchema(many = True)
+# pupil_schema = PupilSchema()
+# pupils_schema = PupilSchema(many = True)
 
 #################################################################################################################################
 #- ##############################################################################################################################
@@ -464,7 +527,7 @@ def delete_pupil(current_user, id):
 #- GET ALL PUPILS
 ###############################
 
-@app.route('/api/pupils', methods=['GET'])
+@app.route('/api/pupil/all', methods=['GET'])
 @token_required
 def get_pupils(current_user):
     all_pupils = Pupil.query.all()
@@ -472,24 +535,29 @@ def get_pupils(current_user):
     return jsonify(result)
 
 ###############################
-#- GET ALL PUPILS OF ONE CLASS
+#- GET PUPILS OFF A LIST (POST METHOD)
 ###############################
 
-@app.route('/api/hermannkinder/<group>', methods=['GET'])
+@app.route('/api/pupil/authorizedlist', methods=['POST'])
 @token_required
-def get_grouppupils(current_user, group):
-    group_pupils = Pupil.query.filter_by(group = group).all()
-    result = pupils_schema.dump(group_pupils)
+def get_given_pupils(current_user):
+    internal_id_list = request.json['pupils']
+    pupils_list = []
+    for item in internal_id_list:
+        this_pupil = db.session.query(Pupil).filter(Pupil.internal_id == item).first()
+        pupils_list.append(this_pupil)
+    #group_pupils = Pupil.query.filter_by(group = group).all()
+    result = pupils_schema.dump(pupils_list)
     return jsonify(result)
 
 ###############################
 #- GET ONE PUPIL
 ###############################
 
-@app.route('/api/hermannkind/<id>', methods=['GET'])
+@app.route('/api/pupil/<internal_id>', methods=['GET'])
 @token_required
-def get_pupil(current_user, id):
-    this_pupil = db.session.query(Pupil).get(id)
+def get_pupil(current_user, internal_id):
+    this_pupil = db.session.query(Pupil).filter(Pupil.internal_id == internal_id).first()
     return pupil_schema.jsonify(this_pupil)
 
 ###################################################################################################################
@@ -627,8 +695,8 @@ def get_categories(current_user):
 @token_required
 def add_goal(current_user, internal_id):
     pupil = Pupil.query.filter_by(internal_id = internal_id).first()
-    pupilid = pupil.internal_id
-    goalcategoryid = request.json['goal_category_id']
+    pupil_id = pupil.internal_id
+    goal_category_id = request.json['goal_category_id']
     created_by = current_user.name
     created_at = request.json['created_at']
     achieved = request.json['achieved']
@@ -636,7 +704,7 @@ def add_goal(current_user, internal_id):
     description = request.json['description']
     strategies = request.json['strategies']
 
-    new_goal = PupilGoal(pupilid, goalcategoryid, created_by, created_at, achieved, achieved_at, description, strategies)
+    new_goal = PupilGoal(pupil_id, goal_category_id, created_by, created_at, achieved, achieved_at, description, strategies)
     db.session.add(new_goal)
     db.session.commit()
     return pupilgoal_schema.jsonify(new_goal)
@@ -650,7 +718,7 @@ def add_goal(current_user, internal_id):
 def put_goal(current_user, internal_id, goal_id):
     goal = PupilGoal.query.filter_by(id = goal_id).first()
     goal.pupil_id = internal_id
-    goal.goalcategoryid = request.json['goal_category_id']
+    goal.pupilcategoryid = request.json['goal_category_id']
     goal.created_by = current_user.name
     goal.created_at = request.json['created_at']
     goal.achieved = request.json['achieved']
@@ -746,16 +814,19 @@ def add_list(current_user):
     
     list_id = str(uuid.uuid4())
     list_description = request.json['list_description']
-    new_list = List(list_id, list_description)
+    print('LIST ID: ', list_id)
+    print("LIST DESCRIPTION: ", list_description)
+    new_list = SchoolList(list_id, list_description)
+    print('CREATED LIST: ', new_list.list_id)
     db.session.add(new_list)
+
     all_pupils = Pupil.query.all()
-    
     for item in all_pupils:
         origin_list = list_id
         listed_pupil_id = item.internal_id
         pupil_list_status = False
-        pupil_list_comment = ''
-        pupil_list_entry_by = ''
+        pupil_list_comment = None
+        pupil_list_entry_by = None
         new_pupil_list = PupilList(origin_list, listed_pupil_id, pupil_list_status, pupil_list_comment, pupil_list_entry_by)
         db.session.add(new_pupil_list)
         db.session.commit()
@@ -768,7 +839,7 @@ def add_list(current_user):
 @app.route('/api/list/all', methods=['GET'])
 @token_required
 def get_lists(current_user):
-    all_lists = List.query.all()
+    all_lists = SchoolList.query.all()
     result = lists_schema.dump(all_lists)
     return jsonify(result)
 
@@ -800,7 +871,7 @@ def add_schoolday(current_user):
 #- GET ALL SCHOOLDAYS
 ###############################
 
-@app.route('/api/schultage', methods=['GET'])
+@app.route('/api/schultag/all', methods=['GET'])
 @token_required
 def get_schooldays(current_user):
     all_schooldays = db.session.query(Schoolday).all()
@@ -844,16 +915,16 @@ def delete_schoolday(current_user, date):
 @app.route('/api/missed_class', methods=['POST'])
 @token_required
 def add_missedclass(current_user):
-    missedpupil_id = request.json['missedpupil_id']
-    missedday = request.json['missed_day']
-    stringtodatetime = datetime.strptime(missedday, '%Y-%m-%d').date()
+    missed_pupil_id = request.json['missed_pupil_id']
+    missed_day = request.json['missed_day']
+    stringtodatetime = datetime.strptime(missed_day, '%Y-%m-%d').date()
     this_schoolday = db.session.query(Schoolday).filter(Schoolday.schoolday == stringtodatetime ).first()
-    missedday_id = this_schoolday.id
-    missedclass_exists = db.session.query(MissedClass).filter(MissedClass.missedday_id == missedday_id, MissedClass.missedpupil_id == missedpupil_id ).first() is not None
+    missed_day_id = this_schoolday.id
+    missedclass_exists = db.session.query(MissedClass).filter(MissedClass.missed_day_id == missed_day_id, MissedClass.missed_pupil_id == missed_pupil_id ).first() is not None
     if missedclass_exists == True :
         return jsonify( {"message": "This missed class exists already - please update instead!"})
     else:    
-        missedtype = request.json['missed_type']
+        missed_type = request.json['missed_type']
         excused = request.json['excused']
         contacted = request.json['contacted']
         returned = request.json['returned']
@@ -862,7 +933,7 @@ def add_missedclass(current_user):
         written_excuse = request.json['writtenExcuse']
         created_by = current_user.name
         modified_by = None
-        new_missedclass = MissedClass(missedpupil_id, missedday_id, missedtype, excused, contacted, returned, written_excuse, late_at, returned_at, created_by, modified_by)
+        new_missedclass = MissedClass(missed_pupil_id, missed_day_id, missed_type, excused, contacted, returned, written_excuse, late_at, returned_at, created_by, modified_by)
 
         db.session.add(new_missedclass)
         db.session.commit()
@@ -876,7 +947,7 @@ def add_missedclass(current_user):
 @token_required
 def get_missedclasses(current_user):
     all_missedclasses = MissedClass.query.all()
-    result = pupilmissedclasses_schema.dump(all_missedclasses)
+    result = missedclasses_schema.dump(all_missedclasses)
     return jsonify(result)
 
 ###############################
@@ -887,7 +958,7 @@ def get_missedclasses(current_user):
 @token_required
 def get_missedclass(current_user, id):
     this_missedclass = db.session.query(MissedClass).get(id)
-    return pupilmissedclass_schema.jsonify(this_missedclass)
+    return missedclass_schema.jsonify(this_missedclass)
 
 ###############################
 #- PATCH MISSED CLASS
@@ -898,10 +969,10 @@ def get_missedclass(current_user, id):
 def update_missedclass(current_user, id, date):
     stringtodatetime = datetime.strptime(date, '%Y-%m-%d').date()
     missed_schoolday = db.session.query(Schoolday).filter(Schoolday.schoolday == stringtodatetime ).first()
-    missedday_id = missed_schoolday.id
-    missedpupil_id = id
-    missedclass = db.session.query(MissedClass).filter(MissedClass.missedday_id == missedday_id, MissedClass.missedpupil_id == missedpupil_id ).first()
-    missedclass.missedtype = request.json['missedtype']
+    missed_day_id = missed_schoolday.id
+    missed_pupil_id = id
+    missedclass = db.session.query(MissedClass).filter(MissedClass.missed_day_id == missed_day_id, MissedClass.missed_pupil_id == missed_pupil_id ).first()
+    missedclass.missed_type = request.json['missed_type']
     missedclass.excused = request.json['excused']
     missedclass.contacted = request.json['contacted']
     db.session.commit()
@@ -917,10 +988,10 @@ def update_missedclass_type_with_date(current_user, id, date):
     
     stringtodatetime = datetime.strptime(date, '%Y-%m-%d').date()
     missed_schoolday = db.session.query(Schoolday).filter(Schoolday.schoolday == stringtodatetime ).first()
-    missedday_id = missed_schoolday.id
-    missedpupil_id = id
-    missedclass = db.session.query(MissedClass).filter(MissedClass.missedday_id == missedday_id, MissedClass.missedpupil_id == missedpupil_id ).first()
-    missedclass.missedtype = request.json['missedtype']
+    missed_day_id = missed_schoolday.id
+    missed_pupil_id = id
+    missedclass = db.session.query(MissedClass).filter(MissedClass.missed_day_id == missed_day_id, MissedClass.missed_pupil_id == missed_pupil_id ).first()
+    missedclass.missed_type = request.json['missed_type']
     
     db.session.commit()
     return missedclass_schema.jsonify(missedclass)
@@ -935,9 +1006,9 @@ def update_missedclass_excused_status_with_date(current_user, id, date):
     
     stringtodatetime = datetime.strptime(date, '%Y-%m-%d').date()
     missed_schoolday = db.session.query(Schoolday).filter(Schoolday.schoolday == stringtodatetime ).first()
-    missedday_id = missed_schoolday.id
-    missedpupil_id = id
-    missedclass = db.session.query(MissedClass).filter(MissedClass.missedday_id == missedday_id, MissedClass.missedpupil_id == missedpupil_id ).first()
+    missed_day_id = missed_schoolday.id
+    missed_pupil_id = id
+    missedclass = db.session.query(MissedClass).filter(MissedClass.missed_day_id == missed_day_id, MissedClass.missed_pupil_id == missed_pupil_id ).first()
     missedclass.excused = request.json['excused']
     
     db.session.commit()
@@ -953,9 +1024,9 @@ def update_missedclass_contacted_status_with_date(current_user, id, date):
     
     stringtodatetime = datetime.strptime(date, '%Y-%m-%d').date()
     missed_schoolday = db.session.query(Schoolday).filter(Schoolday.schoolday == stringtodatetime ).first()
-    missedday_id = missed_schoolday.id
-    missedpupil_id = id
-    missedclass = db.session.query(MissedClass).filter(MissedClass.missedday_id == missedday_id, MissedClass.missedpupil_id == missedpupil_id ).first()
+    missed_day_id = missed_schoolday.id
+    missed_pupil_id = id
+    missedclass = db.session.query(MissedClass).filter(MissedClass.missed_day_id == missed_day_id, MissedClass.missed_pupil_id == missed_pupil_id ).first()
     missedclass.contacted = request.json['contacted']
     
     db.session.commit()
@@ -971,10 +1042,10 @@ def delete_missedclass_with_date(current_user, pupil_id, date):
     
     stringtodatetime = datetime.strptime(date, '%Y-%m-%d').date()
     missed_schoolday = db.session.query(Schoolday).filter(Schoolday.schoolday == stringtodatetime ).first()
-    thismissedday_id = missed_schoolday.id
+    thismissed_day_id = missed_schoolday.id
     missed_schoolday = db.session.query(MissedClass).filter(Schoolday.schoolday == stringtodatetime ).first()
-    missedpupil_id = pupil_id
-    missedclass = db.session.query(MissedClass).filter(MissedClass.missedday_id == thismissedday_id, MissedClass.missedpupil_id == missedpupil_id ).first() 
+    missed_pupil_id = pupil_id
+    missedclass = db.session.query(MissedClass).filter(MissedClass.missed_day_id == thismissed_day_id, MissedClass.missed_pupil_id == missed_pupil_id ).first() 
   
     db.session.delete(missedclass)
     db.session.commit()
@@ -1006,18 +1077,18 @@ def delete_missedclass(current_user, id):
 @token_required
 def add_admonition(current_user):
     admonishedpupil_id = request.json['admonishedpupil_id']
-    admonishedday = request.json['admonishedday']
+    admonishedday = request.json['admonished_day']
     stringtodatetime = datetime.strptime(admonishedday, '%Y-%m-%d').date()
     this_schoolday = db.session.query(Schoolday).filter(Schoolday.schoolday == stringtodatetime ).first()
-    admonishedday_id = this_schoolday.id
-    day_exists = db.session.query(Admonition).filter_by(admonishedday_id = this_schoolday.id).scalar() is not None
+    admonished_day_id = this_schoolday.id
+    day_exists = db.session.query(Admonition).filter_by(admonished_day_id = this_schoolday.id).scalar() is not None
     pupil_exists = db.session.query(Admonition).filter_by(admonishedpupil_id = admonishedpupil_id).scalar is not None
     if day_exists == True and pupil_exists == True:
         return jsonify( {"message": "This missed class exists already - please update instead!"})
     else:    
-        admonitiontype = request.json['admonitiontype']
-        admonitionreason = request.json['admonitionreason']
-        new_admonition = Admonition(admonishedpupil_id, admonishedday_id, admonitiontype, admonitionreason)
+        admonition_type = request.json['admonition_type']
+        admonition_reason = request.json['admonition_reason']
+        new_admonition = Admonition(admonishedpupil_id, admonished_day_id, admonition_type, admonition_reason)
         db.session.add(new_admonition)
         db.session.commit()
         return admonition_schema.jsonify(new_admonition)
@@ -1051,8 +1122,8 @@ def get_admonition(current_user, id):
 @token_required
 def update_admonition(current_user, id):
     admonition = Admonition.query.get(id)
-    admonition.admonitiontype = request.json['admonitiontype']
-    admonition.admonitionreason = request.json['admonitionreason']
+    admonition.admonition_type = request.json['admonition_type']
+    admonition.admonition_reason = request.json['admonition_reason']
     db.session.commit()
     return admonition_schema.jsonify(admonition)
 
@@ -1077,9 +1148,9 @@ def delete_admonition(current_user, id):
 def delete_admonition_by_day(current_user, pupil_id, date):
     stringtodatetime = datetime.strptime(date, '%Y-%m-%d').date()
     admonished_schoolday = db.session.query(Schoolday).filter(Schoolday.schoolday == stringtodatetime ).first()
-    thisadmonishedday_id = admonished_schoolday.id
-    missedpupil_id = pupil_id
-    admonition = db.session.query(Admonition).filter(Admonition.admonishedday_id == thisadmonishedday_id, Admonition.admonishedpupil_id == missedpupil_id ).first() 
+    thisadmonished_day_id = admonished_schoolday.id
+    missed_pupil_id = pupil_id
+    admonition = db.session.query(Admonition).filter(Admonition.admonished_day_id == thisadmonished_day_id, Admonition.admonishedpupil_id == missed_pupil_id ).first() 
     db.session.delete(admonition)
     db.session.commit()
     return jsonify( {"message": "The admonition was deleted!"})
@@ -1088,7 +1159,7 @@ def delete_admonition_by_day(current_user, pupil_id, date):
 # db.init_app(app) because of https://stackoverflow.com/questions/9692962/flask-sqlalchemy-import-context-issue/9695045#9695045
 db.init_app(app)
 with app.app_context():
-    db.drop_all()
+    #db.drop_all()
     db.create_all()
 if __name__ == '__main__':
     app.run(debug=True)

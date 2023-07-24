@@ -35,7 +35,7 @@ class Schoolday(db.Model):
 
 class MissedClass(db.Model):
     id = db.Column(db.Integer, primary_key = True)
-    missedtype = db.Column(db.Enum(MissedTypeEnum), nullable = False)
+    missed_type = db.Column(db.Enum(MissedTypeEnum), nullable = False)
     excused = db.Column(db.Boolean)
     contacted = db.Column(db.Boolean)
     returned = db.Column(db.Boolean)
@@ -46,17 +46,17 @@ class MissedClass(db.Model):
     modified_by = db.Column(db.String(20), nullable=True)
 
     #- RELATIONSHIP TO PUPIL MANY-TO-ONE
-    missedpupil_id = db.Column(db.Integer, db.ForeignKey('pupil.internal_id'))
+    missed_pupil_id = db.Column(db.Integer, db.ForeignKey('pupil.internal_id'))
     missed_pupil = db.relationship('Pupil', back_populates='pupilmissedclasses')
 
     #- RELATIONSHIP TO SCHOOLDAY MANY-TO-ONE
-    missedday_id = db.Column(db.Integer, db.ForeignKey('schoolday.id'))
+    missed_day_id = db.Column(db.Integer, db.ForeignKey('schoolday.id'))
     missed_day = db.relationship('Schoolday', back_populates='missedclasses')
     
-    def __init__(self, missedpupil_id, missedday_id, missedtype, excused, contacted, returned, written_excuse, late_at, returned_at, created_by, modified_by):
-        self.missedpupil_id = missedpupil_id
-        self.missedday_id = missedday_id
-        self.missedtype = missedtype
+    def __init__(self, missed_pupil_id, missed_day_id, missed_type, excused, contacted, returned, written_excuse, late_at, returned_at, created_by, modified_by):
+        self.missed_pupil_id = missed_pupil_id
+        self.missed_day_id = missed_day_id
+        self.missed_type = missed_type
         self.excused = excused
         self.contacted = contacted
         self.returned = returned
@@ -75,22 +75,22 @@ class MissedClass(db.Model):
 ## We need to document admonitions to monitor adequate educational measures
 class Admonition(db.Model):
     id = db.Column(db.Integer, primary_key = True)   
-    admonitiontype = db.Column(db.Enum(AdmonitionTypeEnum),
+    admonition_type = db.Column(db.Enum(AdmonitionTypeEnum),
     nullable = False)
-    admonitionreason = db.Column(db.String(200), nullable = False)
+    admonition_reason = db.Column(db.String(200), nullable = False)
 
     #- RELATIONSHIP TO PUPIL MANY-TO-ONE
     admonishedpupil_id = db.Column('admonished_pupil', db.Integer, db.ForeignKey('pupil.internal_id'))
     admonished_pupil = db.relationship('Pupil', back_populates="pupiladmonitions")
     
     #- RELATIONSHIP TO SCHOOLDAY MANY-TO-ONE
-    admonishedday_id = db.Column('admonished_day', db.Integer, db.ForeignKey('schoolday.id'))
+    admonished_day_id = db.Column('admonished_day', db.Integer, db.ForeignKey('schoolday.id'))
     admonished_day = db.relationship('Schoolday', back_populates="admonitions")
 
-    def __init__(self, admonishedpupil_id, admonishedday_id, admonitiontype, admonitionreason):
+    def __init__(self, admonishedpupil_id, admonished_day_id, admonition_type, admonition_reason):
         self.admonishedpupil_id = admonishedpupil_id
-        self.admonishedday_id = admonishedday_id
-        self.admonitiontype = admonitiontype
-        self.admonitionreason = admonitionreason
+        self.admonished_day_id = admonished_day_id
+        self.admonition_type = admonition_type
+        self.admonition_reason = admonition_reason
 
 
