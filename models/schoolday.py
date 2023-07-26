@@ -9,19 +9,21 @@ db = SQLAlchemy()
 
 
 #- ##############################################################################################
-#################################################################################################
-#-     SCHOOLDAY    ##################################################################################
-#################################################################################################
+##################################################
+#-     SCHOOLDAY    ##############################
+##################################################
 #- ##############################################################################################
 
 
 class Schoolday(db.Model):
     id = db.Column(db.Integer, primary_key = True)
-    schoolday = db.Column(db.Date, nullable = False)
+    schoolday = db.Column(db.Date, nullable = False, unique= True)
     
     #- RELATIONSHIPS ONE-TO-MANY
-    missedclasses = db.relationship('MissedClass', back_populates='missed_day', cascade="all, delete-orphan")
-    admonitions = db.relationship('Admonition', back_populates='admonished_day', cascade="all, delete-orphan")
+    missedclasses = db.relationship('MissedClass', back_populates='missed_day',
+                                    cascade="all, delete-orphan")
+    admonitions = db.relationship('Admonition', back_populates='admonished_day',
+                                  cascade="all, delete-orphan")
 
     def __init__(self, schoolday):
         self.schoolday = schoolday    
@@ -53,7 +55,9 @@ class MissedClass(db.Model):
     missed_day_id = db.Column(db.Integer, db.ForeignKey('schoolday.id'))
     missed_day = db.relationship('Schoolday', back_populates='missedclasses')
     
-    def __init__(self, missed_pupil_id, missed_day_id, missed_type, excused, contacted, returned, written_excuse, late_at, returned_at, created_by, modified_by):
+    def __init__(self, missed_pupil_id, missed_day_id, missed_type, excused,
+                 contacted, returned, written_excuse, late_at, returned_at,
+                 created_by, modified_by):
         self.missed_pupil_id = missed_pupil_id
         self.missed_day_id = missed_day_id
         self.missed_type = missed_type
@@ -80,14 +84,17 @@ class Admonition(db.Model):
     admonition_reason = db.Column(db.String(200), nullable = False)
 
     #- RELATIONSHIP TO PUPIL MANY-TO-ONE
-    admonishedpupil_id = db.Column('admonished_pupil', db.Integer, db.ForeignKey('pupil.internal_id'))
+    admonishedpupil_id = db.Column('admonished_pupil', db.Integer,
+                                   db.ForeignKey('pupil.internal_id'))
     admonished_pupil = db.relationship('Pupil', back_populates="pupiladmonitions")
     
     #- RELATIONSHIP TO SCHOOLDAY MANY-TO-ONE
-    admonished_day_id = db.Column('admonished_day', db.Integer, db.ForeignKey('schoolday.id'))
+    admonished_day_id = db.Column('admonished_day', db.Integer,
+                                  db.ForeignKey('schoolday.id'))
     admonished_day = db.relationship('Schoolday', back_populates="admonitions")
 
-    def __init__(self, admonishedpupil_id, admonished_day_id, admonition_type, admonition_reason):
+    def __init__(self, admonishedpupil_id, admonished_day_id,
+                 admonition_type, admonition_reason):
         self.admonishedpupil_id = admonishedpupil_id
         self.admonished_day_id = admonished_day_id
         self.admonition_type = admonition_type
