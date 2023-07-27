@@ -318,7 +318,7 @@ def create_user():
 
     hashed_password = generate_password_hash(data['password'], method='sha256')
 
-    new_user = User(public_id=str(uuid.uuid4()), name=data['name'],
+    new_user = User(public_id=str(uuid.uuid4().hex), name=data['name'],
                      password=hashed_password, admin=is_admin)
     db.session.add(new_user)
     db.session.commit()
@@ -527,6 +527,8 @@ def get_pupil(current_user, internal_id):
 @token_required
 def delete_pupil(current_user, internal_id):
     pupil = Pupil.query.filter_by(internal_id = internal_id).first()
+    if len(str(pupil.avatar_url)) > 4:
+        os.remove(str(pupil.avatar_url))
     db.session.delete(pupil)
     db.session.commit()
     return jsonify( {"message": "The pupil was deleted!"})
@@ -672,7 +674,7 @@ def add_goal(current_user, internal_id):
     pupil = Pupil.query.filter_by(internal_id = internal_id).first()
     pupil_id = pupil.internal_id
     goal_category_id = request.json['goal_category_id']
-    goal_id = str(uuid.uuid4())
+    goal_id = str(uuid.uuid4().hex)
     created_by = current_user.name
     created_at = request.json['created_at']
     achieved = request.json['achieved']
@@ -799,7 +801,7 @@ def put_category_state(current_user, internal_id, status_id):
 @token_required
 def add_list_all(current_user):
     
-    list_id = str(uuid.uuid4())
+    list_id = str(uuid.uuid4().hex)
     list_name = request.json['list_name']
     list_description = request.json['list_description']
     created_by = current_user.name
@@ -825,7 +827,7 @@ def add_list_all(current_user):
 @token_required
 def add_list_group(current_user):
     internal_id_list = request.json['pupils']
-    list_id = str(uuid.uuid4())
+    list_id = str(uuid.uuid4().hex)
     list_name = request.json['list_name']
     list_description = request.json['list_description']
     created_by = current_user.name
@@ -1155,9 +1157,8 @@ def upload_avatar(current_user, internal_id):
     file = request.files['file']   
     filename = str(uuid.uuid4().hex) + '.jpg'
     avatar_url = app.config['UPLOAD_FOLDER'] + '/' + filename
-    print ('AVATAR URL: ', avatar_url)
     file.save(avatar_url)
-    if pupil.avatar_url != '':
+    if len(str(pupil.avatar_url)) > 4:
         os.remove(str(pupil.avatar_url))
     pupil.avatar_url = avatar_url
     db.session.commit()
