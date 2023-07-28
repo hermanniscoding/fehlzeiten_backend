@@ -1,5 +1,6 @@
 from copy import error
 from flask import Flask, request, jsonify, make_response, send_file
+from sqlalchemy.sql import exists
 from flask_marshmallow import Marshmallow
 from marshmallow import fields
 from marshmallow.decorators import pre_load
@@ -10,6 +11,7 @@ import uuid
 from werkzeug.security import generate_password_hash, check_password_hash
 import jwt
 from functools import wraps
+from flask_sock import Sock
 
 from pprint import pprint
 
@@ -24,6 +26,7 @@ from models.enums import *
 #- Init app
 
 app = Flask(__name__)
+sock = Sock(app)
 basedir = os.path.abspath(os.path.dirname(__file__))
 
 #- APP CONFIG
@@ -85,6 +88,14 @@ class SchooldaySchema(ma.Schema):
 schoolday_schema = SchooldaySchema()
 schooldays_schema = SchooldaySchema(many = True)
 
+class SchooldayOnlySchema(ma.Schema):
+
+    class Meta:
+        fields = ('schoolday',)
+
+schoolday_only_schema = SchooldayOnlySchema()
+schooldays_only_schema = SchooldayOnlySchema(many = True)
+
 # #####################
 #- PUPIL ADMONITION SCHEMA 
 # #####################
@@ -100,7 +111,7 @@ pupiladmonition_schema = PupilAdmonitionSchema()
 pupiladmonitions_schema = PupilAdmonitionSchema(many = True)
 
 ####################
-#- WORKBOOK SCHEMA - CHECKED
+#- PUPIL WORKBOOK SCHEMA - CHECKED
 ####################
 
 class PupilWorkbookSchema(ma.Schema):
@@ -118,6 +129,10 @@ class PupilWorkbookListSchema(ma.Schema):
 pupil_workbook_list_schema = PupilWorkbookListSchema()
 pupilworkbooks_list_schema = PupilWorkbookListSchema(many=True)
 
+####################
+#- WORKBOOK SCHEMA - CHECKED
+####################
+
 class WorkbookSchema(ma.Schema):
     subject = EnumField(SubjectTypeEnum, by_value=False)
     workbookpupils = fields.List(fields.Nested(PupilWorkbookListSchema))
@@ -128,7 +143,7 @@ workbook_schema = WorkbookSchema()
 workbooks_schema = WorkbookSchema(many=True)
 
 ################
-#- LISTS SCHEMA - CHECKED
+#- PUPIL LIST SCHEMA - CHECKED
 ################
 
 class PupilListSchema(ma.Schema):
@@ -147,6 +162,10 @@ class PupilProfileListSchema(ma.Schema):
 pupilprofilelist_schema = PupilListSchema()
 pupilprofilelists_schema = PupilListSchema(many=True)
 
+################
+#- SCHOOL LIST SCHEMA - CHECKED
+################
+
 class SchoolListSchema(ma.Schema):
     pupilsinlist = fields.List(fields.Nested(PupilListSchema))
     
@@ -157,12 +176,12 @@ school_list_schema = SchoolListSchema()
 school_lists_schema = SchoolListSchema(many= True)
 
 ############################
-#- DEVELOPMENT GOALS SCHEMA - CHECKED
+#- DEVELOPMENT GOAL CHECK SCHEMA - CHECKED
 ############################
 
 class GoalCheckSchema(ma.Schema):
     class Meta:
-        fields = ('created_by', 'created_at', 'comment')
+        fields = ('id','created_by', 'created_at', 'comment')
 
 goalcheck_schema = GoalCheckSchema()
 goalchecks_schema = GoalCheckSchema(many = True)
@@ -180,13 +199,21 @@ pupilgoals_schema = PupilGoalSchema(many = True)
 pupilgoals_schema = PupilGoalSchema(many = True) 
 # Pupil 
 
+############################
+#- PUPIL CATEGORY STATUS SCHEMA - CHECKED
+############################
+
 class PupilCategoryStatusSchema(ma.Schema):
     
     class Meta:
-        fields = ('goal_category_id', 'state')    
+        fields = ('id', 'goal_category_id', 'state')    
 
 pupilcategorystatus_schema = PupilCategoryStatusSchema()
 pupilcategorystatuses_schema = PupilCategoryStatusSchema(many= True)
+
+############################
+#- GOAL CATEGORY SCHEMA - CHECKED
+############################
 
 class GoalCategorySchema(ma.Schema):
     categorygoals = fields.List(fields.Nested(PupilGoalSchema))
@@ -198,6 +225,64 @@ class GoalCategorySchema(ma.Schema):
 
 goalcategory_schema = GoalCategorySchema()
 goalcategories_schema = GoalCategorySchema(many = True)
+
+############################
+#- GOAL CATEGORY SCHEMA WITHOUT CHILDREN - CHECKED
+############################
+
+class GoalCategoryFlatSchema(ma.Schema):
+
+    class Meta:
+        fields = ('category_id', 'category_name', 'parent_category')
+
+goalcategoryflat_schema = GoalCategoryFlatSchema()
+goalcategoriesflat_schema = GoalCategoryFlatSchema(many = True)
+
+############################
+#- COMPETENCE CHECKS SCHEMA - CHECKED
+############################
+
+class CompetenceCheckSchema(ma.Schema):
+    class Meta:
+        fields = ('check_id', 'created_by', 'created_at', 'competence_status', 'comment', 'file_url', 'pupil_id', 'competence_id')
+
+competence_check_schema = CompetenceCheckSchema()
+competence_checks_schema = CompetenceCheckSchema(many=True)
+
+############################
+#- COMPETENCE CATEGORIES SCHEMA
+############################
+
+class CompetenceSchema(ma.Schema):
+
+    class Meta:
+        fields = ('competence_id', 'competence_name')
+
+competence_schema = CompetenceSchema()
+competences_schema = CompetenceSchema(many = True)
+
+############################
+#- COMPETENCE FLAT SCHEMA
+############################
+
+class CompetenceFlatSchema(ma.Schema):
+
+    class Meta:
+        fields = ('competence_id', 'parent_competence', 'competence_name')
+
+competence_flat_schema = CompetenceFlatSchema()
+competences_flat_schema = CompetenceFlatSchema(many = True)
+
+############################
+#- AUTHORIZATION SCHEMA - CHECKED
+############################
+
+class AuthorizationSchema(ma.Schema):
+    class Meta:
+        fields = ('description', 'status', 'pupil_id', 'created_by')
+
+authorization_schema = AuthorizationSchema()
+authorizations_schema = AuthorizationSchema(many=True)
 
 ############################
 #- PUPIL SCHEMA - CHECKED
@@ -212,7 +297,8 @@ class PupilSchema(ma.Schema):
     pupilcategorystatuses = fields.List(fields.Nested(PupilCategoryStatusSchema))
     pupilworkbooks = fields.List(fields.Nested(PupilWorkbookSchema))
     pupillists = fields.List(fields.Nested(PupilProfileListSchema))
-    
+    competencechecks = fields.List(fields.Nested(CompetenceCheckSchema, exclude=("pupil_id",)))
+    authorizations = fields.List(fields.Nested(AuthorizationSchema)) 
     class Meta:
         fields = ('internal_id', 'credit', 'ogs', 
                   'individual_development_plan', 'five_years', 
@@ -270,27 +356,39 @@ def token_required(f):
 
     return decorated
 
+#- WEBSOCKET
+@sock.route('/api/socket')
+def websocket(sock):
+    if True:
+        print('SOCKET: connection started')
+    while True:
+        data = sock.receive()
+        print('SOCKET: Data received:', data)
+
+        #sock.send('SOCKET AUS DEM SERVER ')
+# def websocketEmit(sock, data):
+#     while True:
+#         sock.send(data)
+    
+
+
 ##########################################
 #-                      ##################
 #-      API USERS       ##################
 #-                      ##################
 ##########################################
 
-###########
-#- GET USER
-###########
+############
+#- GET USERS *CHECKED*
+############
 
-@app.route('/api/user', methods=['GET'])
+@app.route('/api/user/all', methods=['GET'])
 @token_required
 def get_all_users(current_user):
-
     if not current_user.admin:
-        return jsonify({'message' : 'Cannot perform that function!'})
-
+        return jsonify({'warning' : 'Not authorized for this request!'})
     users = User.query.all()
-
     output = []
-
     for user in users:
         user_data = {}
         user_data['public_id'] = user.public_id
@@ -298,67 +396,59 @@ def get_all_users(current_user):
         user_data['password'] = user.password
         user_data['admin'] = user.admin
         output.append(user_data)
-
     return jsonify({'users' : output})
 
 ##############
-#- POST USER * TESTED
+#- POST USER *CHECKED*
 ##############
 
 @app.route('/api/user', methods=['POST'])
 def create_user():
+#! UNCOMMENT THIS BEFORE PRODUCTION!!
 # @token_required
 # def create_user(current_user):
-    # if not current_user.admin:
-    #     return jsonify({'message' : 'Cannot perform that function!'})
+#     if not current_user.admin:
+#         return jsonify({'error' : 'Not authorized!'})
 
     data = request.get_json()
-
-    is_admin = request.json['is_admin']
-
+    if db.session.query(exists().where(User.name == data['name'])).scalar() == True:
+        return jsonify({'warning' : 'User already exists!'})  
+    is_admin = data['is_admin']
     hashed_password = generate_password_hash(data['password'], method='sha256')
-
     new_user = User(public_id=str(uuid.uuid4().hex), name=data['name'],
                      password=hashed_password, admin=is_admin)
     db.session.add(new_user)
     db.session.commit()
-
     return jsonify({'message' : 'New user created!'})
 
 #################
-#- PUT USER *T ESTED
+#- PUT USER * TESTED
 #################
 
-@app.route('/user/<public_id>', methods=['PUT'])
+@app.route('/api/user/<public_id>', methods=['PUT'])
 @token_required
 def promote_user(current_user, public_id):
     if not current_user.admin:
-        return jsonify({'message' : 'Cannot perform that function!'})
-
+        return jsonify({'warning' : 'Not authorized!'})
     user = User.query.filter_by(public_id=public_id).first()
-
     if not user:
-        return jsonify({'message' : 'No user found!'})
-
+        return jsonify({'error' : 'No user found!'})
     user.admin = True
     db.session.commit()
-
     return jsonify({'message' : 'The user has been promoted!'})
 
 ####################
-#- DELETE USER
+#- DELETE USER *CHECKED*
 ####################
 
-@app.route('/user/<public_id>', methods=['DELETE'])
+@app.route('/api/user/<public_id>', methods=['DELETE'])
 @token_required
 def delete_user(current_user, public_id):
     if not current_user.admin:
-        return jsonify({'message' : 'Cannot perform that function!'})
-
+        return jsonify({'warning' : 'Not authorized!'})
     user = User.query.filter_by(public_id=public_id).first()
-
     if not user:
-        return jsonify({'message' : 'No user found!'})
+        return jsonify({'error' : 'No user found!'})
 
     db.session.delete(user)
     db.session.commit()
@@ -366,7 +456,7 @@ def delete_user(current_user, public_id):
     return jsonify({'message' : 'The user has been deleted!'})
     
 #####################
-#- GET USER LOGIN 
+#- GET USER LOGIN *CHECKED*
 #####################
 
 @app.route('/api/login')
@@ -399,52 +489,56 @@ def login():
 ###############################################
 
 ###############
-#- POST PUPIL * TESTED
+#- POST PUPIL *CHECKED*
 ###############
 
 @app.route('/api/pupil', methods=['POST'])
 @token_required
 def add_pupil(current_user):
-    internal_id = request.json['internal_id']
+    data = request.get_json()
+    internal_id = data['internal_id']
     exists = db.session.query(Pupil).filter_by(internal_id= internal_id).scalar() is not None 
     if exists == True:
         return jsonify( {"message": "This pupil exists already - please update the page!"})
     else:     
-        credit = request.json['credit']
-        ogs = request.json['ogs']
-        five_years = request.json['five_years']
-        individual_development_plan = request.json['individual_development_plan']
-        special_needs = request.json['special_needs']
-        communication_pupil = request.json['communication_pupil']
-        communication_tutor1 = request.json['communication_tutor1']
-        communication_tutor2 = request.json['communication_tutor2']
-        preschool_revision = request.json['preschool_revision']
-        avatar_url = request.json['avatar_url']
-        special_information = request.json['special_information']
-        if request.json['migration_support_ends'] != None:
-            migration_support_ends = datetime.strptime(request.json['migration_support_ends'], '%Y-%m-%d').date() 
+        credit = data['credit']
+        ogs = data['ogs']
+        five_years = data['five_years']
+        individual_development_plan = data['individual_development_plan']
+        special_needs = data['special_needs']
+        communication_pupil = data['communication_pupil']
+        communication_tutor1 = data['communication_tutor1']
+        communication_tutor2 = data['communication_tutor2']
+        preschool_revision = data['preschool_revision']
+        avatar_url = data['avatar_url']
+        special_information = data['special_information']
+        if data['migration_support_ends'] != None:
+            migration_support_ends = datetime.strptime(data['migration_support_ends'], '%Y-%m-%d').date() 
         else:
-            migration_support_ends = request.json['migration_support_ends']
-        if request.json['migration_follow_support_ends'] != None:
-            migration_follow_support_ends = datetime.strptime(request.json['migration_follow_support_ends'], '%Y-%m-%d').date()
+            migration_support_ends = None
+        if data['migration_follow_support_ends'] != None:
+            migration_follow_support_ends = datetime.strptime(data['migration_follow_support_ends'], '%Y-%m-%d').date()
         else:
-            migration_follow_support_ends = request.json['migration_follow_support_ends']
+            migration_follow_support_ends = None
         new_pupil = Pupil(internal_id, credit, ogs, individual_development_plan, five_years,
                         special_needs, communication_pupil, communication_tutor1,
                         communication_tutor2, preschool_revision, migration_support_ends,
                         migration_follow_support_ends, avatar_url, special_information)       
         db.session.add(new_pupil)
         db.session.commit()
-        return pupil_schema.jsonify(new_pupil)
+        response = pupil_schema.jsonify(new_pupil)
+        return response
 
 ###############
-#- PATCH PUPIL * TESTED
+#- PATCH PUPIL *CHECKED*
 ###############
 
 @app.route('/api/pupil/<internal_id>', methods=['PATCH'])
 @token_required
 def update_pupil(current_user, internal_id):
     pupil = Pupil.query.filter_by(internal_id = internal_id).first()
+    if pupil == None:
+        return jsonify({'error': 'This pupil does not exist!'})
     data = request.get_json()
     for key in data:
         match key:
@@ -482,18 +576,20 @@ def update_pupil(current_user, internal_id):
     return pupil_schema.jsonify(pupil)
 
 ###############################
-#- GET ALL PUPILS * TESTED
+#- GET ALL PUPILS *CHECKED*
 ###############################
 
 @app.route('/api/pupil/all', methods=['GET'])
 @token_required
 def get_pupils(current_user):
     all_pupils = Pupil.query.all()
+    if all_pupils == []:
+        return jsonify({'error': 'No pupils found!'})
     result = pupils_schema.dump(all_pupils)
     return jsonify(result)
 
 ###############################
-#- GET LISTED PUPILS * TESTED
+#- GET PUPILS FROM GIVEN IN ARRAY *CHECKED*
 ###############################
 
 @app.route('/api/pupil/list', methods=['GET'])
@@ -504,12 +600,15 @@ def get_given_pupils(current_user):
     for item in internal_id_list:
         this_pupil = db.session.query(Pupil).filter(Pupil.internal_id ==
                                                     item).first()
-        pupils_list.append(this_pupil)
+        if this_pupil != None:
+            pupils_list.append(this_pupil)
+    if pupils_list == []:
+        return jsonify({'error': 'None of the given pupils found!'})
     result = pupils_schema.dump(pupils_list)
     return jsonify(result)
 
 ###############################
-#- GET ONE PUPIL * TESTED
+#- GET ONE PUPIL *CHECKED*
 ###############################
 
 @app.route('/api/pupil/<internal_id>', methods=['GET'])
@@ -517,16 +616,20 @@ def get_given_pupils(current_user):
 def get_pupil(current_user, internal_id):
     this_pupil = db.session.query(Pupil).filter(Pupil.internal_id == 
                                                 internal_id).first()
+    if this_pupil == None:
+        return jsonify({'error': 'This pupil does not exist!'})
     return pupil_schema.jsonify(this_pupil)
 
 ###############################
-#- DELETE PUPIL * TESTED
+#- DELETE PUPIL *CHECKED*
 ###############################
 
 @app.route('/api/pupil/<internal_id>', methods=['DELETE'])
 @token_required
 def delete_pupil(current_user, internal_id):
     pupil = Pupil.query.filter_by(internal_id = internal_id).first()
+    if pupil == None:
+        return jsonify( {"error": "The pupil does not exist!"})
     if len(str(pupil.avatar_url)) > 4:
         os.remove(str(pupil.avatar_url))
     db.session.delete(pupil)
@@ -540,18 +643,20 @@ def delete_pupil(current_user, internal_id):
 ###################################################
 
 ###############################
-#- GET WORKBOOKS * TESTED
+#- GET WORKBOOKS *CHECKED*
 ###############################
 
 @app.route('/api/workbook/all', methods=['GET'])
 @token_required
 def get_workbooks(current_user):
     all_workbooks = Workbook.query.all()
+    if all_workbooks == []:
+        return jsonify({'error': 'No workbooks found!'})
     result = workbooks_schema.dump(all_workbooks)
     return jsonify(result)
 
 ###############################
-#- POST WORKBOOK * TESTED
+#- POST WORKBOOK *CHECKED*
 ###############################
 
 @app.route('/api/workbook/new', methods=['POST'])
@@ -560,45 +665,57 @@ def create_workbook(current_user):
     isbn = request.json['isbn']
     name = request.json['name']
     subject = request.json['subject']
+    if db.session.query(Workbook).filter_by(isbn= isbn).scalar() is not None:
+        return jsonify({"error": "This workbook already exists!"})
     if subject not in subject_enums:
-        return jsonify({"message": "Das Fach ist nicht zulässig!"})
+        return jsonify({"error": "This subject does not exist!"})
     new_workbook = Workbook(isbn, name, subject)
     db.session.add(new_workbook)
     db.session.commit()
     return workbook_schema.jsonify(new_workbook)
 
 ###############################
-#- DELETE WORKBOOK * TESTED
+#- DELETE WORKBOOK *CHECKED*
 ###############################
 
 @app.route('/api/workbook/<isbn>', methods=['DELETE'])
 @token_required
 def delete_workbook(current_user, isbn):
     this_workbook = Workbook.query.filter_by(isbn = isbn).first()
+    if this_workbook == None:
+        return jsonify({'error': 'This workbook does not exist!'})
     db.session.delete(this_workbook)
     db.session.commit()
-    return jsonify( {"message": "Arbeitsheft aus dem Katalog gelöscht!"})
+    return jsonify( {"message": "Workbook deleted!"})
 
 ###############################
-#- POST PUPIL WORKBOOK * TESTED
+#- POST PUPIL WORKBOOK *CHECKED*
 ###############################
 
 @app.route('/api/pupil/<internal_id>/workbook/<isbn>', methods=['POST'])
 @token_required
 def add_workbook_to_pupil(current_user, internal_id, isbn):
     this_pupil = Pupil.query.filter_by(internal_id = internal_id).first()
+    if this_pupil == None:
+        return jsonify({'error': 'This pupil does not exist!'})
     pupil_id = internal_id
+    this_workbook = Workbook.query.filter_by(isbn = isbn).first()
+    if this_workbook == None:
+        return jsonify({'error': 'This workbook does not exist!'})    
     isbn = isbn
+    if db.session.query(exists().where(PupilWorkbook.workbook_isbn == isbn and PupilWorkbook.pupil_id == internal_id)).scalar() == True:
+        return jsonify({'error': 'This pupil workbook exists already!'})    
     state = 'active'
     created_by = current_user.name
     created_at = datetime.now().date()
+    
     new_pupil_workbook = PupilWorkbook(pupil_id, isbn, state, created_by, created_at)
     db.session.add(new_pupil_workbook)
     db.session.commit()
     return pupil_workbook_schema.jsonify(new_pupil_workbook)
 
 ###############################
-#- PATCH PUPIL WORKBOOK  * TESTED
+#- PATCH PUPIL WORKBOOK  *CHECKED*
 ###############################
 
 @app.route('/api/pupil/<internal_id>/workbook/<isbn>', methods=['PATCH'])
@@ -606,6 +723,8 @@ def add_workbook_to_pupil(current_user, internal_id, isbn):
 def update_PupilWorkbook(current_user, internal_id, isbn):
     pupil_workbook = PupilWorkbook.query.filter_by(pupil_id = internal_id,
                                                   workbook_isbn = isbn).first()
+    if pupil_workbook == None:
+        return jsonify({'error': 'This pupil workbook does not exist!'})
     data = request.get_json()
     for key in data:
         match key:
@@ -638,7 +757,7 @@ def delete_PupilWorkbook(current_user, internal_id, isbn):
 ###############################################
 
 ###############################
-#- GET CATEGORIES * TESTED
+#- GET CATEGORIES *CHECKED*
 ###############################
 
 @app.route('/api/goalcategories', methods=['GET'])
@@ -651,6 +770,8 @@ def get_categories(current_user):
     }
     dict = {0: root}
     all_categories = GoalCategory.query.all()
+    if all_categories == []:
+        return jsonify({'error': 'No categories found!'})
     for item in all_categories:
         dict[item.category_id] = current = {
             "category_id": item.category_id,
@@ -665,22 +786,41 @@ def get_categories(current_user):
     return jsonify(root)
 
 ###############################
-#- POST GOAL * TESTED
+#- GET CATEGORIES FLAT JSON *CHECKED*
+###############################
+
+@app.route('/api/goalcategories/flat', methods=['GET'])
+@token_required
+def get_flat_categories(current_user):
+    all_categories = GoalCategory.query.all()
+    if all_categories == None:
+        return jsonify({'error': 'No categories found!'})
+    result = goalcategoriesflat_schema.dump(all_categories)
+    return jsonify(result)    
+
+###############################
+#- POST GOAL *CHECKED*
 ###############################
 
 @app.route('/api/pupil/<internal_id>/goal', methods=['POST'])
 @token_required
 def add_goal(current_user, internal_id):
+    data = request.get_json()
     pupil = Pupil.query.filter_by(internal_id = internal_id).first()
+    if pupil == None:
+        return jsonify({'error': 'This pupil does not exist!'})
     pupil_id = pupil.internal_id
-    goal_category_id = request.json['goal_category_id']
+    goal_category_id = data['goal_category_id']
+    goal_category = db.session.query(GoalCategory).filter_by(category_id = goal_category_id).scalar()
+    if goal_category == None:
+        return jsonify({'error': 'This category does not exist!'})
     goal_id = str(uuid.uuid4().hex)
     created_by = current_user.name
-    created_at = request.json['created_at']
-    achieved = request.json['achieved']
-    achieved_at = request.json['achieved_at']
-    description = request.json['description']
-    strategies = request.json['strategies']
+    created_at = data['created_at']
+    achieved = data['achieved']
+    achieved_at = data['achieved_at']
+    description = data['description']
+    strategies = data['strategies']
     new_goal = PupilGoal(pupil_id, goal_category_id, goal_id, created_by, created_at, achieved,
                          achieved_at, description, strategies)
     db.session.add(new_goal)
@@ -688,13 +828,15 @@ def add_goal(current_user, internal_id):
     return pupilgoal_schema.jsonify(new_goal)
 
 ###############################
-#- PATCH GOAL * TESTED
+#- PATCH GOAL *CHECKED*
 ###############################
 
 @app.route('/api/goal/<goal_id>', methods=['PATCH'])
 @token_required
 def put_goal(current_user, goal_id):
     goal = PupilGoal.query.filter_by(goal_id = goal_id).first()
+    if goal == None:
+        return jsonify({'error': 'This goal does not exist!'})
     data = request.get_json()
     for key in data:
         match key:
@@ -712,13 +854,15 @@ def put_goal(current_user, goal_id):
     return pupilgoal_schema.jsonify(goal)
 
 ###############################
-#- POST GOAL CHECK * TESTED
+#- POST GOAL CHECK *CHECKED*
 ###############################
 
 @app.route('/api/goal/<goal_id>/check', methods=['POST'])
 @token_required
 def add_goalcheck(current_user, goal_id):
     this_goal = PupilGoal.query.filter_by(goal_id = goal_id).first()
+    if this_goal == None:
+        return jsonify({'error': 'This goal does not exist!'})
     this_goal_id = goal_id
     created_by = current_user.name
     created_at = request.json['created_at']
@@ -729,14 +873,15 @@ def add_goalcheck(current_user, goal_id):
     return pupilgoal_schema.jsonify(this_goal)
 
 ###############################
-#- PATCH GOAL CHECK * TESTED
+#- PATCH GOAL CHECK *CHECKED*
 ###############################
-#! TO-DO: IMPLEMENT goal_check_id or pass the id in the schema
 
-@app.route('/api/goal/<goal_id>/check', methods=['PATCH'])
+@app.route('/api/goal/<goal_id>/check/<check_id>', methods=['PATCH'])
 @token_required
-def patch_goalcheck(current_user, goal_id):
-    goal_check = GoalCheck.query.filter_by(goal_id = goal_id).first()
+def patch_goalcheck(current_user, goal_id, check_id):
+    goal_check = GoalCheck.query.filter_by(goal_id = goal_id, id = check_id).first()
+    if goal_check == None:
+        return jsonify({'error': 'This goal check does not exist!'})
     data = request.get_json()
     for key in data:
         match key:
@@ -748,14 +893,19 @@ def patch_goalcheck(current_user, goal_id):
     return goalcheck_schema.jsonify(goal_check)
 
 ###############################
-#- POST GATEGORY STATE * TESTED
+#- POST GATEGORY STATE *CHECKED*
 ###############################
 
 @app.route('/api/pupil/<internal_id>/categorystatus/<category_id>', methods=['POST'])
 @token_required
 def add_category_state(current_user, internal_id, category_id):
     this_pupil = Pupil.query.filter_by(internal_id = internal_id).first()
+    if this_pupil == None:
+        return jsonify({'error': 'Pupil does not exist!'})
     pupil_id = internal_id
+    this_category = GoalCategory.query.filter_by(category_id = category_id).first()
+    if this_category == None:
+        return jsonify({'error': 'Category does not exist!'})
     goal_category_id = category_id
     state = request.json['state']
     created_by = current_user.name
@@ -771,22 +921,152 @@ def add_category_state(current_user, internal_id, category_id):
         return pupil_schema.jsonify(this_pupil)
 
 ###############################
-#- PATCH GATEGORY STATE
+#- PATCH GATEGORY STATE *CHECKED*
 ###############################
 
-@app.route('/api/kind/<internal_id>/categorystatus/<status_id>', methods=['PUT'])
+@app.route('/api/pupil/<internal_id>/categorystatus/<category_id>', methods=['PATCH'])
 @token_required
-def put_category_state(current_user, internal_id, status_id):
+def put_category_state(current_user, internal_id, category_id):
     this_pupil = Pupil.query.filter_by(internal_id = internal_id).first()
-    status = PupilCategoryStatus.query.filter_by(id = status_id).first()
-    status.pupil_id = internal_id
-    status.goal_category_id = request.json['goal_category_id']
-    status.state = request.json['state']
-    status.created_by = current_user.name
-    status.created_at = request.json['created_at']
+    if this_pupil == None:
+        return jsonify({'error': 'This pupil does not exist!'})
+    this_category = GoalCategory.query.filter_by(category_id = category_id).first()
+    if this_category == None:
+        return jsonify({'error': 'This category does not exist!'})
+    status = PupilCategoryStatus.query.filter_by(pupil_id = internal_id, goal_category_id = category_id).first()
+    if status == None:
+        return jsonify({'error': 'This category status does not exist!'})
+    data = request.get_json()
+    for key in data:
+        match key:
+            case 'state':
+                status.state = data['state']
+            case 'created_at':
+                status.created_at = data['created_at']
     db.session.commit()
-    return pupil_schema.jsonify(this_pupil)
+    return goalcategory_schema.jsonify(this_category)
 
+###############################################
+#-                          ###################
+#-   API COMPETENCES        ###################
+#-                          ###################
+###############################################
+
+###############################
+#- GET COMPETENCEs *CHECKED*
+###############################
+
+@app.route('/api/competence/all', methods=['GET'])
+@token_required
+def get_competences(current_user):
+    root = {
+        "competence_id": 0,
+        "competence_name": "competences",
+        "subcompetences": [],
+    }
+    dict = {0: root}
+    all_competences = Competence.query.all()
+    for item in all_competences:
+        dict[item.competence_id] = current = {
+            "competence_id": item.competence_id,
+            "parent_competence": item.parent_competence,
+            "competence_name": item.competence_name,
+            "subcompetences": [],
+        }
+        # Adds actual category to the subcategories list of the parent
+        parent = dict.get(item.parent_competence, root)
+        parent["subcompetences"].append(current)
+
+    return jsonify(root)
+
+###############################
+#- GET CATEGORIES FLAT JSON *CHECKED*
+###############################
+
+@app.route('/api/competence/all/flat', methods=['GET'])
+@token_required
+def get_flat_competences(current_user):
+    all_competences = Competence.query.all()
+    if all_competences == None:
+        return jsonify({'error': 'No competences found!'})
+    result = competences_flat_schema.dump(all_competences)
+    return jsonify(result)    
+
+
+###############################
+#- POST COMPETENCE CHECK
+###############################
+
+@app.route('/api/pupil/<internal_id>/competence/check', methods=['POST'])
+@token_required
+def add_competence_check(current_user, internal_id):
+    pupil = Pupil.query.filter_by(internal_id = internal_id).first()
+    pupil_id = pupil.internal_id
+    competence_id = request.json['competence_id']
+    check_id = str(uuid.uuid4().hex)
+    created_by = current_user.name
+    created_at = request.json['created_at']
+    competence_status = request.json['competence_status']
+    comment = request.json['comment']
+    file_url = None
+    
+    new_competence_check = CompetenceCheck(pupil_id, competence_id,
+                                           check_id, created_by, created_at,
+                                           competence_status, comment, file_url)
+    db.session.add(new_competence_check)
+    db.session.commit()
+    return competence_check_schema.jsonify(new_competence_check)
+
+###############################
+#- PATCH COMPETENCE CHECK WITH IMAGE
+###############################
+
+@app.route('/api/competence/check/<check_id>', methods=['PATCH'])
+@token_required
+def upload_competence_image(current_user, check_id):
+    competence_check = CompetenceCheck.query.filter_by(check_id = check_id).first()
+    
+    if 'file' not in request.files:
+        return jsonify({'error': 'keine Datei vorhanden'}), 400
+    file = request.files['file']   
+    filename = str(uuid.uuid4().hex) + '.jpg'
+    image_url = app.config['UPLOAD_FOLDER'] + '/' + filename
+    file.save(image_url)
+    if len(str(competence_check.image_url)) > 4:
+        os.remove(str(competence_check.image_url))
+    competence_check.image_url = image_url
+    db.session.commit()
+    return jsonify({'message': 'media uploaded succesfully'})
+
+##########################
+#- GET COMPETENCE CHECK IMAGE 
+##########################
+
+@app.route('/api/pupil/competence/<check_id>/image', methods=['GET'])
+@token_required
+def download_competence_image(current_user, check_id):
+    competence_check = CompetenceCheck.query.filter_by(check_id = check_id).first()
+    url_path = competence_check.image_url
+    return send_file(url_path, mimetype='image/jpg')
+
+####################
+#- DELETE COMPETENCE CHECK
+####################
+
+@app.route('/competence_check/<check_id>', methods=['DELETE'])
+@token_required
+def delete_competence_check(current_user, check_id):
+    if not current_user.admin:
+        return jsonify({'message' : 'Cannot perform that function!'})
+
+    competence_check = CompetenceCheck.query.filter_by(check_id = check_id).first()
+    if not competence_check:
+        return jsonify({'message' : 'Competence check does not exist!'})
+    db.session.delete(competence_check)
+    db.session.commit()
+
+    return jsonify({'message' : 'The competence check has been deleted!'})
+    
 ###################################################################################################################
 #-                          #######################################################################################
 #-        API LISTS         #######################################################################################
@@ -794,7 +1074,7 @@ def put_category_state(current_user, internal_id, status_id):
 ###################################################################################################################
 
 ###############################
-#- POST LIST WITH ALL PUPILS * TESTED
+#- POST LIST WITH ALL PUPILS *CHECKED*
 ###############################
 
 @app.route('/api/list/all', methods=['POST'])
@@ -820,61 +1100,89 @@ def add_list_all(current_user):
     return school_list_schema.jsonify(new_list)
 
 ###############################
-#- POST LIST WITH GROUP OF PUPILS * TESTED
+#- POST LIST WITH GROUP OF PUPILS *CHECKED*
 ###############################
 
 @app.route('/api/list/group', methods=['POST'])
 @token_required
 def add_list_group(current_user):
+    this_list_name = request.json['list_name']
+    if db.session.query(exists().where(SchoolList.list_name == this_list_name)).scalar() == True:
+        return jsonify({'message': 'List already exists!'})
     internal_id_list = request.json['pupils']
     list_id = str(uuid.uuid4().hex)
-    list_name = request.json['list_name']
     list_description = request.json['list_description']
     created_by = current_user.name
-    new_list = SchoolList(list_id, list_name, list_description, created_by)
+    new_list = SchoolList(list_id, this_list_name, list_description, created_by)
     db.session.add(new_list)
+    #-We have to create the list to populate it with pupils.
+    #-This is why it is created even if pupils are wrong and the list remains empty. 
     for item in internal_id_list:
-        origin_list = list_id
-        listed_pupil_id = item
-        pupil_list_status = False
-        pupil_list_comment = None
-        pupil_list_entry_by = None
-        new_pupil_list = PupilList(origin_list, listed_pupil_id, pupil_list_status, pupil_list_comment, pupil_list_entry_by)
-        db.session.add(new_pupil_list)
+        if db.session.query(exists().where(Pupil.internal_id == item)).scalar() == True:
+            origin_list = list_id
+            listed_pupil_id = item
+            pupil_list_status = False
+            pupil_list_comment = None
+            pupil_list_entry_by = None
+            new_pupil_list = PupilList(origin_list, listed_pupil_id, pupil_list_status, pupil_list_comment, pupil_list_entry_by)
+            db.session.add(new_pupil_list)
     db.session.commit()
     return school_list_schema.jsonify(new_list)
 
 ###############################
-#- GET ALL LISTS * TESTED
+#- GET ALL LISTS *CHECKED*
 ###############################
 
 @app.route('/api/list/all', methods=['GET'])
 @token_required
 def get_lists(current_user):
     all_lists = SchoolList.query.all()
+    if all_lists == []:
+        return jsonify({'error': 'There are no lists!'})
     result = school_lists_schema.dump(all_lists)
     return jsonify(result)
 
 ################################
-#- POST PUPIL(S) TO LIST * TESTED
+#- POST PUPIL(S) TO LIST *CHECKED*
 ################################
 
 @app.route('/api/list/<list_id>/pupils', methods=['POST'])
 @token_required
 def add_pupil_to_list(current_user, list_id):
-    
+    school_list = SchoolList.query.filter_by(list_id = list_id).first()
+    if school_list == None:
+        return jsonify({'error': 'This list does not exist!'})
     internal_id_list = request.json['pupils']
-    for item in internal_id_list:
-        school_list = SchoolList.query.filter_by(list_id = list_id).first()
-        origin_list = list_id
-        listed_pupil_id = item
-        pupil_list_status = False
-        pupil_list_comment = None
-        pupil_list_entry_by = None
-        new_pupil_list = PupilList(origin_list, listed_pupil_id, pupil_list_status, pupil_list_comment, pupil_list_entry_by)
-        db.session.add(new_pupil_list)
+    if internal_id_list == []:
+        return jsonify({'error': 'No pupils found to add to list!'})
+    for item in internal_id_list:        
+        if Pupil.query.filter_by(internal_id = item).first() != None:
+            if PupilList.query.filter_by(origin_list= list_id, listed_pupil_id= item).first() == None:
+                origin_list = list_id
+                listed_pupil_id = item
+                pupil_list_status = False
+                pupil_list_comment = None
+                pupil_list_entry_by = None
+                new_pupil_list = PupilList(origin_list, listed_pupil_id, pupil_list_status, pupil_list_comment, pupil_list_entry_by)
+                db.session.add(new_pupil_list)
     db.session.commit()
     return school_list_schema.jsonify(school_list)
+
+###############################
+#- DELETE LIST *CHECKED*
+###############################
+
+@app.route('/api/list/<list_id>', methods=['DELETE'])
+@token_required
+def delete_list(current_user, list_id):
+    this_list_id = list_id
+    this_list = db.session.query(SchoolList).filter(SchoolList.list_id == this_list_id).first()
+    if this_list == None:
+        return jsonify( {"error": "The school list does not exist!"})
+    db.session.delete(this_list)
+    db.session.commit()
+    return jsonify( {"message": "The school list was deleted!"})
+
 
 ####################################################################################################################
 #-                           #######################################################################################
@@ -883,7 +1191,7 @@ def add_pupil_to_list(current_user, list_id):
 ####################################################################################################################
 
 ###############################
-#- POST SCHOOLDAY * TESTED
+#- POST SCHOOLDAY *CHECKED*
 ###############################
 
 @app.route('/api/schoolday', methods=['POST'])
@@ -901,25 +1209,42 @@ def add_schoolday(current_user):
         return schoolday_schema.jsonify(new_schoolday)
 
 ###############################
-#- GET ALL SCHOOLDAYS * TESTED
+#- GET ALL SCHOOLDAYS *CHECKED*
 ###############################
 
 @app.route('/api/schoolday/all', methods=['GET'])
 @token_required
 def get_schooldays(current_user):
     all_schooldays = db.session.query(Schoolday).all()
+    if all_schooldays == []:
+        return jsonify({'error': 'No schooldays found!'})    
     result = schooldays_schema.dump(all_schooldays)
     return jsonify(result)
 
 ###############################
-#- GET ONE SCHOOLDAY * TESTED
+#- GET ALL SCHOOLDAYS WITHOUT CHILDREN *CHECKED*
+###############################
+
+@app.route('/api/schoolday/only', methods=['GET'])
+@token_required
+def get_schooldays_only(current_user):
+    all_schooldays = db.session.query(Schoolday).all()
+    if all_schooldays == []:
+        return jsonify({'error': 'No schooldays found!'})
+    result = schooldays_only_schema.dump(all_schooldays)
+    return jsonify(result)
+###############################
+#- GET ONE SCHOOLDAY WITH CHILDREN *CHECKED*
 ###############################
 
 @app.route('/api/schoolday/<date>', methods=['GET'])
 @token_required
 def get_schooday(current_user, date):
     stringtodatetime = datetime.strptime(date, '%Y-%m-%d').date()
+    #- If date has wrong format and strptime fails, we're screwed :-/
     this_schoolday = db.session.query(Schoolday).filter(Schoolday.schoolday == stringtodatetime ).first()
+    if this_schoolday == None:
+        return jsonify({'error': 'This schoolday does not exist!'})
     return schoolday_schema.jsonify(this_schoolday)
 
 ###############################
@@ -942,20 +1267,24 @@ def delete_schoolday(current_user, date):
 ######################################################################################################################
 
 ###############################
-#- POST MISSED CLASS * TESTED
+#- POST MISSED CLASS *CHECKED*
 ###############################
 
 @app.route('/api/missedclass', methods=['POST'])
 @token_required
 def add_missedclass(current_user):
     missed_pupil_id = request.json['missed_pupil_id']
+    if db.session.query(exists().where(Pupil.internal_id == missed_pupil_id)).scalar() != True:
+        return jsonify( {"error": "This pupil does not exist!"})
     missed_day = request.json['missed_day']
     stringtodatetime = datetime.strptime(missed_day, '%Y-%m-%d').date()
     this_schoolday = db.session.query(Schoolday).filter(Schoolday.schoolday == stringtodatetime ).first()
+    if this_schoolday == None:
+        return jsonify( {"error": "This schoolday does not exist!"})
     missed_day_id = this_schoolday.id
     missedclass_exists = db.session.query(MissedClass).filter(MissedClass.missed_day_id == missed_day_id, MissedClass.missed_pupil_id == missed_pupil_id ).first() is not None
     if missedclass_exists == True :
-        return jsonify( {"message": "This missed class exists already - please update instead!"})
+        return jsonify( {"error": "This missed class exists already - please update instead!"})
     else:    
         missed_type = request.json['missed_type']
         excused = request.json['excused']
@@ -974,36 +1303,45 @@ def add_missedclass(current_user):
         return missedclass_schema.jsonify(new_missedclass)
 
 ###############################
-#- GET ALL MISSED CLASSES * TESTED
+#- GET ALL MISSED CLASSES *CHECKED*
 ###############################
 
 @app.route('/api/missedclass/all', methods=['GET'])
 @token_required
 def get_missedclasses(current_user):
     all_missedclasses = MissedClass.query.all()
+    if all_missedclasses == []:
+        return jsonify({'error': 'There are no missed classes!'})
     result = missedclasses_schema.dump(all_missedclasses)
     return jsonify(result)
 
 ###############################
-#- GET ONE MISSED CLASS * TESTED
+#- GET ONE MISSED CLASS *CHECKED*
 ###############################
 
 @app.route('/api/missedclass/<id>', methods=['GET'])
 @token_required
 def get_missedclass(current_user, id):
     this_missedclass = db.session.query(MissedClass).get(id)
+    if this_missedclass == None:
+        return jsonify({'error': 'This missed class does not exist!'})
+
     return missedclass_schema.jsonify(this_missedclass)
 
 ###############################
-#- PATCH MISSED CLASS * TESTED
+#- PATCH MISSED CLASS *CHECKED*
 ###############################
 
 @app.route('/api/missedclass/<pupil_id>/<date>', methods=['PATCH'])
 @token_required
 def update_missedclass(current_user, pupil_id, date):
-    stringtodatetime = datetime.strptime(date, '%Y-%m-%d').date()
-    missed_schoolday = db.session.query(Schoolday).filter(Schoolday.schoolday == stringtodatetime ).first()
-    missed_class = db.session.query(MissedClass).filter(MissedClass.missed_day_id == missed_schoolday.id, MissedClass.missed_pupil_id == pupil_id ).first()
+    date_as_datetime = datetime.strptime(date, '%Y-%m-%d').date()
+    missed_schoolday = db.session.query(Schoolday).filter(Schoolday.schoolday == date_as_datetime ).first()
+    if missed_schoolday == None:
+        return jsonify({'error': 'This schoolday does not exist!'})
+    missed_class = db.session.query(MissedClass).filter(MissedClass.missed_day_id == missed_schoolday.id and MissedClass.missed_pupil_id == pupil_id ).first()
+    if missed_class == None:
+        return jsonify({'error': 'This missed class does not exist!'})
     data = request.get_json()
     for key in data:
         match key:
@@ -1053,21 +1391,26 @@ def delete_missedclass_with_date(current_user, pupil_id, schoolday):
 #####################################################################################################################
 
 ###############################
-#- POST ADMONITION  * TESTED
+#- POST ADMONITION  *CHECKED*
 ###############################
 
 @app.route('/api/admonition', methods=['POST'])
 @token_required
 def add_admonition(current_user):
     admonishedpupil_id = request.json['admonishedpupil_id']
+    if db.session.query(exists().where(Pupil.internal_id == admonishedpupil_id)).scalar() == False:
+        return jsonify( {"error": "This pupil does not exist!"})
     admonishedday = request.json['admonished_day']
     stringtodatetime = datetime.strptime(admonishedday, '%Y-%m-%d').date()
     this_schoolday = db.session.query(Schoolday).filter(Schoolday.schoolday == stringtodatetime ).first()
+    if this_schoolday == None:
+        return jsonify( {"error": "This schoolday does not exist!"})
     admonished_day_id = this_schoolday.id
     day_exists = db.session.query(Admonition).filter_by(admonished_day_id = this_schoolday.id).scalar() is not None
     pupil_exists = db.session.query(Admonition).filter_by(admonishedpupil_id = admonishedpupil_id).scalar is not None
+    
     if day_exists == True and pupil_exists == True:
-        return jsonify( {"message": "This missed class exists already - please update instead!"})
+        return jsonify( {"error": "This missed class exists already - please update instead!"})
     else:    
         admonition_type = request.json['admonition_type']
         admonition_reason = request.json['admonition_reason']
@@ -1077,24 +1420,29 @@ def add_admonition(current_user):
         return admonition_schema.jsonify(new_admonition)
 
 ###############################
-#- GET ADMONITIONS  * TESTED
+#- GET ADMONITIONS  *CHECKED*
 ###############################
 
 @app.route('/api/admonition/all', methods=['GET'])
 @token_required
 def get_admonitions(current_user):
     all_admonitions = Admonition.query.all()
+    if all_admonitions == []:
+        return jsonify({'warning': 'No admonitions found!'})
     result = pupiladmonitions_schema.dump(all_admonitions)
     return jsonify(result)
 
 ###############################
-#- GET ONE ADMONITION * TESTED
+#- GET ONE ADMONITION *CHECKED*
 ###############################
 
 @app.route('/api/admonition/<id>', methods=['GET'])
 @token_required
 def get_admonition(current_user, id):
     this_admonition = db.session.query(Admonition).get(id)
+    if this_admonition == None:
+        return jsonify({'error': 'This admonition does not exist!'})
+
     return pupiladmonition_schema.jsonify(this_admonition)
 
 ###############################
@@ -1144,7 +1492,7 @@ def delete_admonition_by_day(current_user, pupil_id, date):
     return jsonify( {"message": "The admonition was deleted!"})
 
 ##########################
-#- PATCH IMAGE PUPIL AVATAR * TESTED
+#- PATCH IMAGE PUPIL AVATAR *CHECKED*
 ##########################
 
 @app.route('/api/pupil/<internal_id>/avatar', methods=['PATCH'])
@@ -1152,8 +1500,10 @@ def delete_admonition_by_day(current_user, pupil_id, date):
 def upload_avatar(current_user, internal_id):
     pupil = db.session.query(Pupil).filter(Pupil.internal_id == 
                                                 internal_id).first()
+    if pupil == None:
+        return jsonify({'error': 'This pupil does not exist!'})
     if 'file' not in request.files:
-        return jsonify({'error': 'keine Datei vorhanden'}), 400
+        return jsonify({'error': 'No file attached!'}), 400
     file = request.files['file']   
     filename = str(uuid.uuid4().hex) + '.jpg'
     avatar_url = app.config['UPLOAD_FOLDER'] + '/' + filename
@@ -1162,7 +1512,7 @@ def upload_avatar(current_user, internal_id):
         os.remove(str(pupil.avatar_url))
     pupil.avatar_url = avatar_url
     db.session.commit()
-    return jsonify({'msg': 'media uploaded succesfully'})
+    return jsonify({'message': 'Media uploaded succesfully!'})
 
 ##########################
 #- GET IMAGE PUPIL AVATAR * TESTED
@@ -1177,11 +1527,14 @@ def download_avatar(current_user, internal_id):
     return send_file(url_path, mimetype='image/jpg')
 
 #############################
-#- CSV IMPORTS * TESTED
-#############################
-#- from https://gist.github.com/dasdachs/69c42dfcfbf2107399323a4c86cdb791
+#- CSV IMPORTS 
+## from https://gist.github.com/dasdachs/69c42dfcfbf2107399323a4c86cdb791
 
-@app.route('/api/import/categories', methods=['GET', 'POST'])
+##########################
+#- IMPORT CATEGORIES *CHECKED*
+##########################
+
+@app.route('/api/import/categories', methods=['POST'])
 @token_required
 def upload_categories_csv(current_user):
     new_categories = []
@@ -1192,13 +1545,45 @@ def upload_categories_csv(current_user):
         csv_reader = csv.reader(csv_file, delimiter=';')
         for row in csv_reader:
             #- I'd very much like to jump over the first row to have headings in the csv, now taking them out by hand.
-            category = GoalCategory(category_id=row[0],	parent_category=row[1],	category_name=row[2])
-            new_categories.append(category)
-            db.session.add(category)
-        
+                if db.session.query(exists().where(GoalCategory.category_id == row[0])).scalar() == False:
+                    category = GoalCategory(category_id=row[0],	parent_category=row[1],	category_name=row[2])
+                    new_categories.append(category)
+                    db.session.add(category)
+                if new_categories == []:
+                    return jsonify({'message': 'No new items!'})
+            
         db.session.commit()
         return goalcategories_schema.jsonify(new_categories)
 
+##########################
+#- IMPORT COMPETENCES *CHECKED*
+##########################
+
+@app.route('/api/import/competences', methods=['POST'])
+@token_required
+def upload_competences_csv(current_user):
+    new_competences = []
+    if request.method == 'POST':
+
+        csv_file = request.files['file']
+        csv_file = TextIOWrapper(csv_file, encoding='utf-8')
+        csv_reader = csv.reader(csv_file, delimiter=';', skipinitialspace= True)
+        for row in csv_reader:
+            #- I'd very much like to jump over the first row to have headings in the csv, now taking them out by hand.
+            if db.session.query(exists().where(Competence.competence_id == row[0])).scalar() == False:
+                competence = Competence(competence_id=row[0],	parent_competence=row[1],	competence_name=row[2])
+                new_competences.append(competence)
+            if new_competences == []:
+                return jsonify({'message': 'No new items!'})
+
+            db.session.add(competence)
+        
+        db.session.commit()
+        return competences_schema.jsonify(new_competences)
+
+########################
+#- GET IMPORT SCHOOLDAYS *CHECKED*
+########################
 @app.route('/api/import/schooldays', methods=['GET', 'POST'])
 @token_required
 def upload_schooldays_csv(current_user):
@@ -1209,10 +1594,13 @@ def upload_schooldays_csv(current_user):
         csv_file = TextIOWrapper(csv_file, encoding='utf-8')
         csv_reader = csv.reader(csv_file, delimiter=';')
         for row in csv_reader:
-            schoolday = Schoolday(schoolday=datetime.strptime(row[0], '%Y-%m-%d').date())
-            new_schooldays.append(schoolday)
-            db.session.add(schoolday)
-        
+            #- I'd very much like to jump over the first row to have headings in the csv, now taking them out by hand.
+                if db.session.query(exists().where(Schoolday.schoolday == datetime.strptime(row[0], '%Y-%m-%d').date())).scalar() == False:
+                    schoolday = Schoolday(schoolday=datetime.strptime(row[0], '%Y-%m-%d').date())
+                    new_schooldays.append(schoolday)
+                    db.session.add(schoolday)
+                if new_schooldays == []:
+                    return jsonify({'message': 'No new items!'})        
         db.session.commit()
         return schooldays_schema.jsonify(new_schooldays)
 
@@ -1221,7 +1609,7 @@ def upload_schooldays_csv(current_user):
 # db.init_app(app) because of https://stackoverflow.com/questions/9692962/flask-sqlalchemy-import-context-issue/9695045#9695045
 db.init_app(app)
 with app.app_context():
-    #db.drop_all()
+    # db.drop_all()
     db.create_all()
 if __name__ == '__main__':
     app.run(debug=True)

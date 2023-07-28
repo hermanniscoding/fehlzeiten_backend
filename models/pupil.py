@@ -38,16 +38,21 @@ class Pupil(db.Model):
     pupiladmonitions = db.relationship('Admonition', back_populates='admonished_pupil',
                                        cascade="all, delete-orphan")
     
-    #- TO ASSOCIATION OBJECTS - TO-DO: IMPLEMENT DELETE ORPHAN
+    #- TO-DO: DOUBLE CHECK DELETE ORPHAN
     pupilgoals = db.relationship('PupilGoal', back_populates='pupil',
                                  cascade="all, delete-orphan")
     pupilcategorystatuses = db.relationship('PupilCategoryStatus',
                                             back_populates='pupil',
                                             cascade="all, delete-orphan")
-    pupilworkbooks = db.relationship('PupilWorkbook', back_populates='pupils',
+    pupilworkbooks = db.relationship('PupilWorkbook', back_populates='pupil',
                                       cascade="all, delete-orphan")
     pupillists = db.relationship('PupilList', back_populates='listed_pupil',
                                  cascade="all, delete-orphan")
+    competencechecks = db.relationship('CompetenceCheck', back_populates='pupil',
+                                        cascade="all, delete-orphan")
+    authorizations = db.relationship('Authorization', back_populates='pupil',
+                                        cascade="all, delete-orphan")
+        
     #- RELATIONSHIPS MANY TO ONE
 
     def __init__(self, internal_id, credit, ogs, individual_development_plan,
@@ -102,7 +107,7 @@ class PupilWorkbook(db.Model):
 
     #- RELATIONSHIP TO PUPIL MANY-TO-ONE
     pupil_id = db.Column('pupil_id', db.Integer, db.ForeignKey('pupil.internal_id'))
-    pupils = db.relationship('Pupil', back_populates='pupilworkbooks')
+    pupil = db.relationship('Pupil', back_populates='pupilworkbooks')
 
     #- RELATIONSHIP TO WORKBOOK MANY-TO-ONE
     workbook_isbn = db.Column('isbn_id', db.Integer, db.ForeignKey('workbook.isbn'))
@@ -264,3 +269,60 @@ class GoalCheck(db.Model):
         self.created_by = created_by
         self.created_at = created_at
         self.comment = comment
+
+class Competence(db.Model):
+    id = db.Column(db.Integer, primary_key = True)
+    competence_id = db.Column(db.Integer, unique=True, nullable = False)
+    parent_competence = db.Column(db.Integer, nullable = True)
+    competence_name = db.Column(db.String(200), nullable = False)
+
+    #- RELATIONSHIP TO CHECKS ONE-TO-MANY
+    competencechecks = db.relationship('CompetenceCheck', back_populates='competence_check')
+    
+    def __init__(self, competence_id, parent_competence, competence_name):
+        self.competence_id = competence_id
+        self.parent_competence = parent_competence
+        self.competence_name = competence_name
+
+class CompetenceCheck(db.Model):
+    id = db.Column(db.Integer, primary_key = True)
+    check_id = db.Column(db.Integer, nullable = False, unique = True)    
+    created_by = db.Column(db.String(20),nullable = False)
+    created_at = db.Column(db.String(25), nullable = False)
+    competence_status = db.Column(db.Integer, nullable = False)
+    comment = db.Column(db.String(50), nullable = False)
+    file_url = db.Column(db.String(50), nullable = True)
+
+    #- RELATIONSHIP TO PUPIL MANY-TO-ONE
+    pupil_id = db.Column(db.Integer, db.ForeignKey('pupil.internal_id'))
+    pupil = db.relationship('Pupil', back_populates='competencechecks')
+
+    #- RELATIONSHIP TO PUPIL GOAL MANY-TO-ONE
+    competence_id = db.Column(db.Integer, db.ForeignKey('competence.competence_id'))
+    competence_check = db.relationship('Competence', back_populates='competencechecks')
+
+    def __init__(self, check_id, created_by, created_at, competence_status, comment, file_url, pupil_id, competence_id):
+        self.check_id = check_id
+        self.created_by = created_by
+        self.created_at = created_at
+        self.competence_status = competence_status
+        self.comment = comment
+        self.file_url = file_url
+        self.pupil_id = pupil_id
+        self.competence_id = competence_id
+
+class Authorization(db.Model):
+    id = db.Column(db.Integer, primary_key = True)
+    description = db.Column(db.String(20), nullable= False)
+    status = db.Column(db.Boolean, nullable=False, default=False)
+    created_by = db.Column(db.String(5), nullable= False)
+
+    #- RELATIONSHIP TO PUPIL MANY-TO-ONE
+    pupil_id = db.Column(db.Integer, db.ForeignKey('pupil.internal_id'))
+    pupil = db.relationship('Pupil', back_populates='authorizations')
+
+    def __init__(self, description, status, pupil_id, created_by):
+        self.description = description
+        self.status = status
+        self.created_by = created_by
+        self.pupil_id = pupil_id
