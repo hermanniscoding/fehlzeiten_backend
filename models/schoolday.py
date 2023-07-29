@@ -1,8 +1,8 @@
 from copy import error
-import enum
+
 from flask_sqlalchemy import SQLAlchemy
 from .pupil import *
-from .enums import *
+
 
 db = SQLAlchemy()
 
@@ -37,7 +37,7 @@ class Schoolday(db.Model):
 
 class MissedClass(db.Model):
     id = db.Column(db.Integer, primary_key = True)
-    missed_type = db.Column(db.Enum(MissedTypeEnum), nullable = False)
+    missed_type = db.Column(db.String(10), nullable = False)
     excused = db.Column(db.Boolean)
     contacted = db.Column(db.Boolean)
     returned = db.Column(db.Boolean)
@@ -79,8 +79,7 @@ class MissedClass(db.Model):
 ## We need to document admonitions to monitor adequate educational measures
 class Admonition(db.Model):
     id = db.Column(db.Integer, primary_key = True)   
-    admonition_type = db.Column(db.Enum(AdmonitionTypeEnum),
-    nullable = False)
+    admonition_type = db.Column(db.String(10), nullable = False)
     admonition_reason = db.Column(db.String(200), nullable = False)
 
     #- RELATIONSHIP TO PUPIL MANY-TO-ONE

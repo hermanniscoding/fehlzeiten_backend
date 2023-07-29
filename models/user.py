@@ -1,5 +1,4 @@
 from copy import error
-import enum
 from flask_sqlalchemy import SQLAlchemy
 from .schoolday import db
 

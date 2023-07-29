@@ -2,7 +2,7 @@ from copy import error
 from sqlalchemy.orm import backref, relationship
 from sqlalchemy_utils import auto_delete_orphans
 from .schoolday import *
-from .enums import *
+
 
 # db = SQLAlchemy()
 
@@ -84,7 +84,7 @@ class Workbook(db.Model):
     id = db.Column(db.Integer, primary_key = True)
     isbn = db.Column(db.String(20), unique=True)
     name = db.Column(db.String(20))
-    subject = db.Column(db.Enum(SubjectTypeEnum))
+    subject = db.Column(db.String(10))
 
     #- RELATIONSHIPS ##################
 
